@@ -38,11 +38,20 @@ A *pattern* defines the identity part of a filename — the **prefix**:
   (default `%Y%m%d_%H%M%S`) as naive local wall-clock time — the time a
   human at the scene would have read off a watch. Sorting names sorts by
   capture time.
-- **Digest slice** is the first *n* lowercase hex characters of the whole
-  file's content digest (default: 8 characters of MD5). The slice is long
-  enough to make collisions within one archive implausible, short enough to
-  keep names readable. The digest is an identity and integrity check, not a
+- **Digest slice** is the first *n* lowercase hex characters of the file's
+  content digest (default: 8 characters of MD5). The slice is long enough
+  to make collisions within one archive implausible, short enough to keep
+  names readable. The digest is an identity and integrity check, not a
   cryptographic guarantee.
+- **What gets digested is decided per extension by the pattern.** By
+  default the whole file — pure, tool-independent math. Extensions listed
+  in the pattern's `image_hash` are digested over their image data only
+  (ExifTool's `ImageDataHash`): the right choice for formats that DAMs
+  edit in place, where keywords, ratings and rename tokens rewrite the
+  file — with image-data hashing those names never drift, and a mismatch
+  means the pixels themselves changed. The mapping is part of the
+  pattern's identity: changing it changes what every name means, which is
+  by definition a migration.
 - A prefix is capped at 31 characters so it always fits IPTC fields with a
   32-character limit, which DAM integrations use as a rename token.
 
@@ -235,6 +244,11 @@ not a replacement — duplicate content is a finding for a human, not a
 conflict for the tool to resolve.
 
 ## The embedded-token circularity
+
+*(This section describes whole-file-hashed embedded formats. With
+image-data hashing — the recommended configuration for them — the
+circularity below does not arise: the token is metadata, so writing it
+never changes the digest the name is built from.)*
 
 For a master whose metadata lives inside the file (JPEG, DNG, TIFF),
 writing the DAM rename token changes the file's content — so a name

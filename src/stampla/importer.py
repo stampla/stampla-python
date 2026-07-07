@@ -23,6 +23,7 @@ from pathlib import Path
 from stampla.apply import apply_plan, validate_plan
 from stampla.config import Config, Tree
 from stampla.dates import ResolvedDate, resolve_date
+from stampla.digests import naming_digests
 from stampla.exiftool import ExifTool
 from stampla.family import OriginalGroup, group_originals
 from stampla.hashing import compute_digests, hash_files
@@ -94,6 +95,7 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
     )
     with ExifTool() as tool:
         metadata = tool.read_metadata(master_paths, tags) if master_paths else {}
+        naming, naming_errors = naming_digests(master_paths, config.pattern, tool, workers=workers)
     digests, hash_errors = hash_files(files, [plan.algorithm], workers=workers)
 
     moves: list[FamilyMove] = []
@@ -106,8 +108,9 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
         if tree is None:
             report.add(Finding(Bucket.UNNAMED, master, "no tree configured for this media kind"))
             continue
-        if master in hash_errors:
-            report.add(Finding(Bucket.HASH_ERROR, master, hash_errors[master]))
+        if master in hash_errors or master in naming_errors:
+            detail = naming_errors.get(master) or hash_errors.get(master, "")
+            report.add(Finding(Bucket.HASH_ERROR, master, detail))
             continue
         chain = config.date_chain_video if is_video else config.date_chain_photo
         resolved = resolve_date(metadata.get(master, {}), chain)
@@ -121,8 +124,7 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
             members = tuple(m for m in members if m not in twins)
             for twin in twins:
                 report.add(Finding(Bucket.IGNORED, twin, "JPEG twin of a RAW; skipped by policy"))
-        digest = digests[master][plan.algorithm]
-        prefix = config.pattern.build_prefix(resolved.value, digest)
+        prefix = config.pattern.build_prefix(resolved.value, naming[master])
         destination = root / tree.path / _render_layout(tree.layout, resolved)
         trimmed = OriginalGroup(directory=group.directory, base=group.base, members=members)
         renames = _member_targets(trimmed, prefix, destination)

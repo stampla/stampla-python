@@ -164,6 +164,32 @@ class ExifTool:
                     results[Path(source)] = entry
         return results
 
+    def read_image_hashes(self, paths: Sequence[Path], algorithm: str = "md5") -> dict[Path, str]:
+        """Digest of each file's image data only, metadata excluded.
+
+        Files whose format has no image-data stream ExifTool can hash are
+        simply absent from the result.
+        """
+        type_names = {"md5": "MD5", "sha256": "SHA256", "sha512": "SHA512"}
+        if algorithm not in type_names:
+            raise ExifToolError(f"image hashing does not support {algorithm!r}")
+        charset_args = ["-charset", "filename=UTF8"] if sys.platform == "win32" else []
+        results: dict[Path, str] = {}
+        for start in range(0, len(paths), _QUERY_CHUNK_SIZE):
+            chunk = paths[start : start + _QUERY_CHUNK_SIZE]
+            entries = self.execute_json(
+                "-api",
+                f"imagehashtype={type_names[algorithm]}",
+                *charset_args,
+                "-ImageDataHash",
+                *(str(path) for path in chunk),
+            )
+            for entry in entries:
+                value = entry.get("ImageDataHash")
+                if isinstance(value, str) and value:
+                    results[Path(entry["SourceFile"])] = value.lower()
+        return results
+
     def _require_process(self) -> subprocess.Popen[bytes]:
         if self._process is None:
             raise ExifToolError("exiftool process is not running; call start() first")

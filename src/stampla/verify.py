@@ -17,16 +17,15 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
 from stampla.config import Config, Tree
 from stampla.dates import UnresolvedDate, resolve_date
+from stampla.digests import digest_under, naming_digests
 from stampla.exiftool import ExifTool
 from stampla.family import Family, group_by_prefix
-from stampla.hashing import hash_files
-from stampla.manifest import Manifest, ManifestError
+from stampla.manifest import Manifest
 from stampla.pattern import NamingPattern
 from stampla.report import Bucket, Finding, Report
 from stampla.scan import FileStatus, ScannedFile, scan_tree
@@ -118,24 +117,14 @@ def _verify_tree(
     digests: dict[Path, str] = {}
     hash_errors: dict[Path, str] = {}
     if not options.skip_hash and candidates:
-        algorithm = config.pattern.digest
-        to_hash = candidates
-        if manifest is not None and not options.full:
-            for path in candidates:
-                try:
-                    cached = manifest.lookup(path, algorithm)
-                except ManifestError:
-                    continue  # uncacheable path; hash it every time
-                if cached is not None:
-                    digests[path] = cached
-            to_hash = [path for path in candidates if path not in digests]
-        if to_hash:
-            raw_digests, hash_errors = hash_files(to_hash, [algorithm], workers=options.workers)
-            for path, result in raw_digests.items():
-                digests[path] = result[algorithm]
-                if manifest is not None:
-                    with suppress(ManifestError):
-                        manifest.record(path, algorithm, result[algorithm])
+        digests, hash_errors = naming_digests(
+            candidates,
+            config.pattern,
+            tool,
+            manifest=manifest,
+            workers=options.workers,
+            full=options.full,
+        )
 
     derived_owners: dict[str, list[Path]] = defaultdict(list)
     for family in families:
@@ -143,13 +132,14 @@ def _verify_tree(
             report,
             family,
             master_extensions,
-            config.mutable_extensions,
-            config.pattern,
+            config,
             chain,
             metadata,
             digests,
             hash_errors,
             options.skip_hash,
+            tool,
+            manifest,
         )
         if derived is not None:
             derived_owners[derived[0]].append(derived[1])
@@ -173,13 +163,14 @@ def _classify_family(
     report: Report,
     family: Family,
     master_extensions: frozenset[str],
-    mutable_extensions: frozenset[str],
-    pattern: NamingPattern,
+    config: Config,
     chain: Sequence[str],
     metadata: Mapping[Path, Mapping[str, object]],
     digests: Mapping[Path, str],
     hash_errors: Mapping[Path, str],
     skip_hash: bool,
+    tool: ExifTool,
+    manifest: Manifest | None,
 ) -> tuple[str, Path] | None:
     """Classify one family; returns (derived prefix, master path) if derivable."""
     candidates = family.master_candidates(master_extensions)
@@ -195,6 +186,7 @@ def _classify_family(
         )
         return None
 
+    pattern = config.pattern
     if len(candidates) > 1:
         master = _master_by_hash(family, candidates, pattern, digests)
         if master is None:
@@ -221,13 +213,14 @@ def _classify_family(
         return None
 
     actual_prefix = family.prefix
-    if pattern.datetime_of(actual_prefix) != resolved.value:
-        derived_datetime = resolved.value.strftime(pattern.datetime_format)
+    named_pattern = master.parsed.pattern if master.parsed else pattern
+    if named_pattern.datetime_of(actual_prefix) != resolved.value:
+        derived_datetime = resolved.value.strftime(named_pattern.datetime_format)
         report.add(
             Finding(
                 Bucket.DATE_MISMATCH,
                 path,
-                f"name says {actual_prefix[: pattern.datetime_length]},"
+                f"name says {actual_prefix[: named_pattern.datetime_length]},"
                 f" metadata says {derived_datetime} ({resolved.source})",
             )
         )
@@ -245,16 +238,37 @@ def _classify_family(
         report.ok += 1
         return (derived_prefix, path)
 
+    # A same-looking name may have been produced by an additional
+    # recognized pattern: re-derive under each before judging content.
+    for alternative in config.additional_patterns:
+        if not alternative.matches_prefix(actual_prefix):
+            continue
+        alt_digest = digest_under(path, alternative, tool, manifest)
+        if alt_digest is None:
+            continue
+        if alternative.build_prefix(resolved.value, alt_digest) == actual_prefix:
+            report.add(
+                Finding(
+                    Bucket.OTHER_PATTERN,
+                    path,
+                    f"intact under pattern {alternative.name!r};"
+                    f" pending migration to {pattern.name!r}",
+                )
+            )
+            return None
+
     ext = master.parsed.ext if master.parsed else path.suffix.lstrip(".").lower()
-    bucket = Bucket.EDIT_DRIFT if ext in mutable_extensions else Bucket.CORRUPTION
-    report.add(
-        Finding(
-            bucket,
-            path,
+    if pattern.digest_source_for(ext) == "image":
+        bucket = Bucket.CORRUPTION
+        meaning = "image data differs from the name"
+    else:
+        mutable = ext in config.mutable_extensions
+        bucket = Bucket.EDIT_DRIFT if mutable else Bucket.CORRUPTION
+        meaning = (
             f"name says {pattern.digest_of(actual_prefix)},"
-            f" content is {digest[: pattern.digest_length]}",
+            f" content is {digest[: pattern.digest_length]}"
         )
-    )
+    report.add(Finding(bucket, path, meaning))
     return (derived_prefix, path)
 
 

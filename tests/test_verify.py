@@ -225,6 +225,85 @@ class TestVerifyEndToEnd:
         code = main(["verify", "--config", str(archive / "config.toml")])
         assert code == 2
 
+
+def image_hash_of(path: Path) -> str:
+    return subprocess.run(
+        ["exiftool", "-api", "imagehashtype=MD5", "-s3", "-ImageDataHash", str(path)],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def make_image_master(directory: Path, capture: str, seasoning: bytes = b"") -> Path:
+    """A canonical master named by its image-data hash."""
+    directory.mkdir(parents=True, exist_ok=True)
+    scratch = directory / "scratch.jpg"
+    scratch.write_bytes(TINY_JPEG + seasoning)
+    exiftool(f"-EXIF:DateTimeOriginal={capture}", str(scratch))
+    compact = capture.replace(":", "").replace(" ", "_")
+    named = directory / f"{compact}_{image_hash_of(scratch)[:8]}.jpg"
+    scratch.rename(named)
+    return named
+
+
+HYBRID_CONFIG = (
+    CONFIG_TEMPLATE
+    + """
+[pattern]
+name = "md5-hybrid"
+image_hash = ["jpg", "jpeg"]
+
+[[pattern.additional]]
+name = "md5-file"
+"""
+)
+
+
+@requires_exiftool
+class TestHybridPattern:
+    @pytest.fixture
+    def hybrid_archive(self, tmp_path: Path) -> Path:
+        (tmp_path / "config.toml").write_text(HYBRID_CONFIG.format(root=str(tmp_path)))
+        return tmp_path
+
+    def test_metadata_edits_do_not_drift_names(self, hybrid_archive: Path) -> None:
+        month = hybrid_archive / "Photos" / "2026" / "2026-01"
+        master = make_image_master(month, "2026:01:05 12:30:00")
+        exiftool("-XMP-dc:Subject+=holiday", "-XMP-xmp:Rating=5", str(master))
+
+        code, payload = run_cli(hybrid_archive)
+        summary = payload["summary"]
+        assert isinstance(summary, dict)
+        assert code == 0, payload
+        assert summary["ok"] == 1
+
+    def test_image_data_change_is_corruption(self, hybrid_archive: Path) -> None:
+        month = hybrid_archive / "Photos" / "2026" / "2026-02"
+        master = make_image_master(month, "2026:02:05 12:30:00")
+        payload_bytes = bytearray(master.read_bytes())
+        # flip one bit inside the entropy-coded data, just before EOI,
+        # avoiding bytes that could form or break a JPEG marker
+        index = len(payload_bytes) - 4
+        while payload_bytes[index] in (0xFF, 0xFE, 0x00) or payload_bytes[index - 1] == 0xFF:
+            index -= 1
+        payload_bytes[index] ^= 0x01
+        master.write_bytes(payload_bytes)
+
+        code, payload = run_cli(hybrid_archive)
+        assert code == 1
+        assert buckets_of(payload)[master.name] == "corruption"
+
+    def test_file_hash_named_master_is_other_pattern(self, hybrid_archive: Path) -> None:
+        # named under the additional whole-file pattern: pending migration,
+        # neither drift nor corruption
+        month = hybrid_archive / "Photos" / "2026" / "2026-03"
+        master = make_master(month, "2026:03:05 12:30:00")
+
+        code, payload = run_cli(hybrid_archive)
+        assert code == 1
+        by_name = buckets_of(payload)
+        assert by_name[master.name] == "other-pattern"
+
     def test_missing_root_is_an_error(self, tmp_path: Path) -> None:
         config = tmp_path / "no-root.toml"
         config.write_text('[[trees]]\npath = "Photos"\nmedia = "photo"\n')

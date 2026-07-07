@@ -26,16 +26,15 @@ The DAM workflow after injection (Lightroom Classic):
 
 from __future__ import annotations
 
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
 from stampla.config import Config, Tree
 from stampla.dates import ResolvedDate, resolve_date
+from stampla.digests import naming_digests
 from stampla.exiftool import ExifTool
 from stampla.family import group_by_prefix
-from stampla.hashing import hash_files
-from stampla.manifest import Manifest, ManifestError
+from stampla.manifest import Manifest
 from stampla.report import Bucket, Finding, Report
 from stampla.scan import scan_tree
 
@@ -101,19 +100,9 @@ def _inject_tree(
     token_tag = config.dam.token_tag.partition(":")[2] or config.dam.token_tag
     tags = sorted({entry.partition(":")[2] or entry for entry in chain} | {token_tag})
     metadata = tool.read_metadata(masters, tags) if masters else {}
-    algorithm = config.pattern.digest
-    digests: dict[Path, str] = {}
-    for path in masters:
-        with suppress(ManifestError):
-            cached = manifest.lookup(path, algorithm)
-            if cached is not None:
-                digests[path] = cached
-    to_hash = [path for path in masters if path not in digests]
-    raw_digests, _ = hash_files(to_hash, [algorithm], workers=options.workers)
-    for path, result in raw_digests.items():
-        digests[path] = result[algorithm]
-        with suppress(ManifestError):
-            manifest.record(path, algorithm, result[algorithm])
+    digests, _ = naming_digests(
+        masters, config.pattern, tool, manifest=manifest, workers=options.workers
+    )
 
     for family in families:
         master = family.master(master_extensions)
@@ -132,7 +121,10 @@ def _inject_tree(
             continue
 
         extension = master.parsed.ext if master.parsed else ""
-        if extension in EMBEDDED_TOKEN_EXTENSIONS and _is_converged(
+        if (
+            extension in EMBEDDED_TOKEN_EXTENSIONS
+            and config.pattern.digest_source_for(extension) == "file"
+        ) and _is_converged(
             family.prefix, derived, metadata[path], token_tag, config.pattern.datetime_length
         ):
             # Writing the token changed the content, so the name can never
