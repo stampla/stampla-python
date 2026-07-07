@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from stampla import __version__
 from stampla.apply import undo_journal
 from stampla.config import Config, ConfigError, load_config
 from stampla.exiftool import ExifToolError
+from stampla.importer import apply_import, build_plan
 from stampla.journal import Journal, list_journals
 from stampla.verify import VerifyOptions, run_verify
 
@@ -52,6 +54,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify.add_argument("--workers", type=int, help="parallel hashing processes")
 
+    import_cmd = subparsers.add_parser(
+        "import",
+        help="copy a memory card into the archive, named on arrival",
+    )
+    import_cmd.add_argument("card", type=Path, help="card or directory to import from")
+    import_cmd.add_argument("--config", type=Path, help="TOML configuration file")
+    import_cmd.add_argument("--root", type=Path, help="archive root (overrides the config)")
+    import_cmd.add_argument("--json", action="store_true", help="machine-readable output")
+    import_cmd.add_argument(
+        "--apply",
+        action="store_true",
+        help="actually copy; without this flag the plan is only shown",
+    )
+    import_cmd.add_argument("--workers", type=int, help="parallel hashing processes")
+
     undo = subparsers.add_parser(
         "undo",
         help="revert a journaled apply run (most recent by default)",
@@ -70,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "undo":
             return _run_undo_command(args)
+        if args.command == "import":
+            return _run_import_command(args)
         return _run_verify_command(args)
     except (ConfigError, ExifToolError, ValueError, OSError) as error:
         print(f"stampla: {error}", file=sys.stderr)
@@ -97,11 +116,45 @@ def _run_undo_command(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
-def _run_verify_command(args: argparse.Namespace) -> int:
+def _run_import_command(args: argparse.Namespace) -> int:
+    config, root = _config_and_root(args)
+    plan = build_plan(config, root.resolve(), args.card, workers=args.workers)
+    report = apply_import(plan, root.resolve()) if args.apply else plan.report
+
+    if args.json:
+        payload = json.loads(report.to_json())
+        payload["applied"] = args.apply
+        payload["planned"] = [
+            {
+                "family": move.key,
+                "copies": [[str(r.old), str(r.new)] for r in move.renames],
+            }
+            for move in plan.moves
+        ]
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        if not args.apply:
+            for move in plan.moves:
+                for rename in move.renames:
+                    print(f"  {rename.old}  ->  {rename.new}")
+            if plan.moves:
+                print()
+        print(report.render_text())
+        if not args.apply and plan.moves:
+            print(f"\ndry run: {len(plan.moves)} group(s) would be imported; pass --apply to copy")
+    return 1 if report.has_findings else 0
+
+
+def _config_and_root(args: argparse.Namespace) -> tuple[Config, Path]:
     config = load_config(args.config) if args.config else Config()
     root = args.root or (Path(config.root) if config.root else None)
     if root is None:
         raise ConfigError("no archive root: set 'root' in the config or pass --root")
+    return config, root
+
+
+def _run_verify_command(args: argparse.Namespace) -> int:
+    config, root = _config_and_root(args)
     options = VerifyOptions(
         skip_hash=args.skip_hash,
         workers=args.workers,

@@ -1,0 +1,221 @@
+"""The import command: memory card to archive, named on arrival.
+
+Files on the card are grouped by original base name (master plus its
+sidecars and labeled derivatives), the master's capture time and content
+hash produce the family's prefix, and every member is **copied** into
+the tree's layout directory under its canonical name. Sources on the
+card are never modified or deleted — the card remains the last-resort
+backup until it is formatted in the camera.
+
+After copying, every master is re-hashed at its destination and compared
+against the digest computed from the card, so a transfer error cannot go
+unnoticed. Groups that cannot be imported safely (unresolvable capture
+time, target already present, no recognizable master) are reported and
+skipped; they never abort the rest of the card.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from stampla.apply import apply_plan, validate_plan
+from stampla.config import Config, Tree
+from stampla.dates import ResolvedDate, resolve_date
+from stampla.exiftool import ExifTool
+from stampla.family import OriginalGroup, group_originals
+from stampla.hashing import compute_digests, hash_files
+from stampla.journal import FamilyMove, Journal, Rename
+from stampla.report import Bucket, Finding, Report
+
+
+@dataclass(frozen=True)
+class ImportOptions:
+    apply: bool = False
+    workers: int | None = None
+    journal_dir: Path | None = None
+
+
+@dataclass
+class ImportPlan:
+    algorithm: str
+    moves: tuple[FamilyMove, ...] = ()
+    report: Report = field(default_factory=Report)
+    #: expected digest of each copied master at its destination
+    expected: dict[Path, str] = field(default_factory=dict)
+
+
+def build_plan(config: Config, root: Path, card: Path, workers: int | None = None) -> ImportPlan:
+    """Work out every copy the card calls for, without touching anything."""
+    if not card.is_dir():
+        raise ValueError(f"card path is not a directory: {card}")
+    plan = ImportPlan(algorithm=config.pattern.digest)
+    report = plan.report
+
+    files = [
+        path for path in sorted(card.rglob("*")) if path.is_file() and not path.name.startswith(".")
+    ]
+    report.scanned = len(files)
+    camera_extensions = (config.raw_extensions - {"tif", "tiff"}) | config.video_extensions
+    groups = group_originals(files, config.sidecar_dirs, camera_extensions)
+    report.families = len(groups)
+
+    masters: dict[tuple[Path, str], Path] = {}
+    for group in groups:
+        master = _master_of(group, config, camera_extensions)
+        if master is None:
+            report.add(
+                Finding(
+                    Bucket.ORPHAN_FAMILY,
+                    group.members[0],
+                    f"no master in group {group.base!r}; not imported",
+                    related=group.members[1:],
+                )
+            )
+            continue
+        masters[(group.directory, group.base)] = master
+
+    master_paths = sorted(masters.values())
+    tags = sorted(
+        {
+            entry.partition(":")[2] or entry
+            for entry in config.date_chain_photo + config.date_chain_video
+        }
+    )
+    with ExifTool() as tool:
+        metadata = tool.read_metadata(master_paths, tags) if master_paths else {}
+    digests, hash_errors = hash_files(master_paths, [plan.algorithm], workers=workers)
+
+    moves: list[FamilyMove] = []
+    for group in groups:
+        master = masters.get((group.directory, group.base))
+        if master is None:
+            continue
+        is_video = master.suffix.lstrip(".").lower() in config.video_extensions
+        tree = _tree_for(config, "video" if is_video else "photo")
+        if tree is None:
+            report.add(Finding(Bucket.UNNAMED, master, "no tree configured for this media kind"))
+            continue
+        if master in hash_errors:
+            report.add(Finding(Bucket.HASH_ERROR, master, hash_errors[master]))
+            continue
+        chain = config.date_chain_video if is_video else config.date_chain_photo
+        resolved = resolve_date(metadata.get(master, {}), chain)
+        if not isinstance(resolved, ResolvedDate):
+            report.add(Finding(Bucket.UNRESOLVED_DATE, master, resolved.reason))
+            continue
+
+        digest = digests[master][plan.algorithm]
+        prefix = config.pattern.build_prefix(resolved.value, digest)
+        destination = root / tree.path / _render_layout(tree.layout, resolved)
+        renames, clash = _group_renames(group, prefix, destination)
+        if clash is not None:
+            report.add(
+                Finding(
+                    Bucket.COLLISION,
+                    master,
+                    f"target already exists: {clash} (already imported?)",
+                    related=tuple(m for m in group.members if m != master),
+                )
+            )
+            continue
+        moves.append(FamilyMove(key=prefix, renames=tuple(renames)))
+        plan.expected[destination / f"{prefix}.{master.suffix.lstrip('.').lower()}"] = digest
+        report.ok += 1
+
+    plan.moves = tuple(moves)
+    return plan
+
+
+def apply_import(plan: ImportPlan, root: Path, journal_dir: Path | None = None) -> Report:
+    """Copy a built plan into the archive and verify the copies."""
+    report = plan.report
+    if not plan.moves:
+        return report
+    problems = validate_plan(plan.moves, root, sources_outside_root=True)
+    if problems:
+        raise ValueError("plan failed validation:\n" + "\n".join(problems))
+
+    journal = Journal.create(root, plan.moves, directory=journal_dir, kind="copy")
+    result = apply_plan(journal)
+    for key, error in result.failed:
+        report.ok -= 1
+        report.add(Finding(Bucket.HASH_ERROR, Path(key), f"import failed: {error}"))
+
+    for target, expected in sorted(plan.expected.items()):
+        if not target.is_file():
+            continue  # its group failed above
+        actual = compute_digests(target, [plan.algorithm])[plan.algorithm]
+        if actual != expected:
+            report.ok -= 1
+            report.add(
+                Finding(
+                    Bucket.CORRUPTION,
+                    target,
+                    "copy verification failed: destination content differs from the card"
+                    " — do not format the card",
+                )
+            )
+    return report
+
+
+def _tree_for(config: Config, media: str) -> Tree | None:
+    return next((tree for tree in config.trees if tree.media == media), None)
+
+
+def _master_of(
+    group: OriginalGroup, config: Config, camera_extensions: frozenset[str]
+) -> Path | None:
+    def base_named(member: Path) -> bool:
+        return member.name.split(".", 1)[0] == group.base
+
+    candidates = [
+        member
+        for member in group.members
+        if base_named(member) and member.suffix.lstrip(".").lower() in camera_extensions
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        # RAW+JPEG-style twins: the raw is the master
+        raws = [
+            member
+            for member in candidates
+            if member.suffix.lstrip(".").lower() in config.raw_extensions
+        ]
+        return raws[0] if len(raws) == 1 else None
+    # a lone edited photo (e.g. only a jpg) is its own master
+    loose = [
+        member
+        for member in group.members
+        if base_named(member) and member.suffix.lstrip(".").lower() in {"jpg", "jpeg"}
+    ]
+    return loose[0] if len(loose) == 1 else None
+
+
+def _group_renames(
+    group: OriginalGroup, prefix: str, destination: Path
+) -> tuple[list[Rename], Path | None]:
+    """Every member's copy, or the first destination that already exists."""
+    renames: list[Rename] = []
+    for member in group.members:
+        remainder = member.name[len(group.base) :]
+        suffix, dot, extensions = remainder.partition(".")
+        new_name = f"{prefix}{suffix}{dot}{extensions.lower()}"
+        in_sidecar_dir = member.parent != group.directory
+        target_dir = destination / member.parent.name if in_sidecar_dir else destination
+        target = target_dir / new_name
+        if target.exists():
+            return [], target
+        renames.append(Rename(old=member, new=target))
+    return renames, None
+
+
+def _render_layout(layout: str, resolved: ResolvedDate) -> Path:
+    value = resolved.value
+    rendered = (
+        layout.replace("{yyyy}", f"{value.year:04d}")
+        .replace("{mm}", f"{value.month:02d}")
+        .replace("{dd}", f"{value.day:02d}")
+    )
+    return Path(rendered)

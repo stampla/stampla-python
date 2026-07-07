@@ -41,17 +41,28 @@ def default_journal_dir() -> Path:
 class Journal:
     """One apply run's plan and progress."""
 
-    def __init__(self, path: Path, root: Path, moves: tuple[FamilyMove, ...]) -> None:
+    def __init__(
+        self, path: Path, root: Path, moves: tuple[FamilyMove, ...], kind: str = "rename"
+    ) -> None:
         self.path = path
         self.root = root
         self.moves = moves
+        self.kind = kind
         self._done_path = path.with_suffix(".done")
 
     @classmethod
     def create(
-        cls, root: Path, moves: tuple[FamilyMove, ...], directory: Path | None = None
+        cls,
+        root: Path,
+        moves: tuple[FamilyMove, ...],
+        directory: Path | None = None,
+        kind: str = "rename",
     ) -> Journal:
-        """Write the full plan to a new journal file before any rename."""
+        """Write the full plan to a new journal file before any change.
+
+        ``kind`` is ``rename`` (sources move away) or ``copy`` (sources
+        stay; undo deletes the copies).
+        """
         directory = directory or default_journal_dir()
         directory.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -62,6 +73,7 @@ class Journal:
             path = directory / f"journal-{stamp}-{os.getpid()}-{counter}.json"
         payload = {
             "version": 1,
+            "kind": kind,
             "created_at": stamp,
             "root": str(root),
             "moves": [
@@ -78,7 +90,7 @@ class Journal:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(scratch, path)
-        return cls(path, root, moves)
+        return cls(path, root, moves, kind=kind)
 
     @classmethod
     def load(cls, path: Path) -> Journal:
@@ -93,7 +105,7 @@ class Journal:
             )
             for entry in payload["moves"]
         )
-        return cls(path, Path(payload["root"]), moves)
+        return cls(path, Path(payload["root"]), moves, kind=payload.get("kind", "rename"))
 
     def done_keys(self) -> set[str]:
         if not self._done_path.exists():

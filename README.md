@@ -25,6 +25,28 @@ name prefix and are renamed together, atomically.
 
 ## Usage
 
+### import
+
+Copy a memory card into the archive, named on arrival:
+
+```console
+$ stampla import /Volumes/CARD --config archive.toml
+  /Volumes/CARD/DSC_0001.NEF  ->  /archive/Photos/2026/2026-07/20260701_100000_9b677b64.nef
+  /Volumes/CARD/DSC_0001.xmp  ->  /archive/Photos/2026/2026-07/20260701_100000_9b677b64.xmp
+
+dry run: 1 group(s) would be imported; pass --apply to copy
+```
+
+Masters travel with their sidecars and labeled derivatives as one group.
+Import **copies** — files on the card are never modified or removed, so
+the card stays a backup until you format it in the camera. Every copied
+master is re-hashed at its destination and compared with the digest read
+from the card, so a transfer error cannot slip through. Files whose
+capture time cannot be resolved, and groups whose target names already
+exist (a re-inserted card), are reported and skipped without blocking
+the rest. Nothing changes without `--apply`, and every apply is
+journaled and revertable with `stampla undo`.
+
 ### verify
 
 Recompute every name from metadata and content, and report what disagrees:
