@@ -34,7 +34,9 @@ def compute_digests(
 
 def default_workers() -> int:
     """Leave one core for the rest of the pipeline."""
-    return max(1, (os.process_cpu_count() or 2) - 1)
+    # os.process_cpu_count() respects CPU affinity but needs Python 3.13
+    count = getattr(os, "process_cpu_count", os.cpu_count)()
+    return max(1, (count or 2) - 1)
 
 
 def hash_files(
