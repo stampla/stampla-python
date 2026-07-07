@@ -142,7 +142,8 @@ is unresolvable. There is no `--apply`; import confirmed batches with
 
 ## Status
 
-Early development.
+Early development; command surface complete, release preparation in
+progress. See [CHANGELOG.md](CHANGELOG.md).
 
 Safety first: every command is a dry run unless explicitly applied, and a
 file whose capture time cannot be resolved is reported, never renamed.
@@ -165,6 +166,7 @@ sensible default:
 | `[extensions]` | which extensions are RAW masters, and which formats are edited in place |
 | `[[sidecar_dirs]]` | sidecars kept in subdirectories beside their masters |
 | `excludes` | glob patterns never to touch |
+| `[import]` | card files to ignore (camera housekeeping, `*.jpg` for RAW-only shooters) and the RAW+JPEG twin policy |
 | `[dam]` | hand off renaming of DAM-managed masters via a metadata token |
 
 ## Requirements
