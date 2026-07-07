@@ -206,3 +206,28 @@ Design choices, deliberately boring:
   preserves both size and mtime. `--full` bypasses it entirely and should
   be run periodically; the manifest makes the *routine* case fast, it
   does not replace the deep check.
+
+## Renaming safely
+
+Everything that writes goes through one engine, with protections in a
+fixed order:
+
+1. **Global validation before any I/O.** Every source must exist, no two
+   renames may share a source or target, no target may already exist,
+   and every path must stay inside the archive root. One problem
+   anywhere means nothing is touched — a plan is valid as a whole or not
+   at all.
+2. **Write-ahead journal.** The complete plan is persisted to
+   `~/.stampla/journals/` — outside the archive — before the first
+   rename. As each family completes, its key is appended to a done-log;
+   appends are cheap and crash-safe.
+3. **Per-family atomicity.** A family's renames either all happen or the
+   already-done ones are reverted on the spot; a failed family never
+   leaves a master separated from its sidecars. Other families proceed.
+4. **Resume and undo.** Re-running an interrupted journal skips families
+   already in the done-log. `stampla undo` reverts a journal's done
+   families in reverse order, with the same no-clobber rules.
+
+Renames never overwrite. An existing target is a refusal and a report,
+not a replacement — duplicate content is a finding for a human, not a
+conflict for the tool to resolve.

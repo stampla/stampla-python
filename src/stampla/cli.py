@@ -7,8 +7,10 @@ import sys
 from pathlib import Path
 
 from stampla import __version__
+from stampla.apply import undo_journal
 from stampla.config import Config, ConfigError, load_config
 from stampla.exiftool import ExifToolError
+from stampla.journal import Journal, list_journals
 from stampla.verify import VerifyOptions, run_verify
 
 
@@ -49,6 +51,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="neither read nor update the per-machine manifest",
     )
     verify.add_argument("--workers", type=int, help="parallel hashing processes")
+
+    undo = subparsers.add_parser(
+        "undo",
+        help="revert a journaled apply run (most recent by default)",
+    )
+    undo.add_argument("journal", nargs="?", type=Path, help="journal file to revert")
+    undo.add_argument("--list", action="store_true", help="list available journals")
     return parser
 
 
@@ -59,10 +68,33 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     try:
+        if args.command == "undo":
+            return _run_undo_command(args)
         return _run_verify_command(args)
-    except (ConfigError, ExifToolError, ValueError) as error:
+    except (ConfigError, ExifToolError, ValueError, OSError) as error:
         print(f"stampla: {error}", file=sys.stderr)
         return 2
+
+
+def _run_undo_command(args: argparse.Namespace) -> int:
+    if args.list:
+        for path in list_journals():
+            print(path)
+        return 0
+    journal_path = args.journal
+    if journal_path is None:
+        journals = list_journals()
+        if not journals:
+            raise ValueError("no journals found; nothing to undo")
+        journal_path = journals[-1]
+    result = undo_journal(Journal.load(journal_path))
+    print(
+        f"undo {journal_path.name}: {len(result.applied)} family(ies) reverted,"
+        f" {len(result.skipped)} not applied, {len(result.failed)} failed"
+    )
+    for key, error in result.failed:
+        print(f"  FAILED {key}: {error}", file=sys.stderr)
+    return 0 if result.ok else 1
 
 
 def _run_verify_command(args: argparse.Namespace) -> int:

@@ -69,9 +69,12 @@ Early development. Planned next:
 - integration with DAM tools (e.g. Adobe Lightroom Classic) so managed
   masters are renamed by the DAM itself via a metadata token
 
-Safety first: every command is a dry run unless explicitly applied, renames
-are journaled and undoable, and a file whose capture time cannot be resolved
-is reported, never renamed.
+Safety first: every command is a dry run unless explicitly applied, and a
+file whose capture time cannot be resolved is reported, never renamed.
+Renames are validated as a whole before anything is touched, journaled to
+`~/.stampla/journals/` before the first change, applied atomically per
+file family, resumable after interruption, and revertable with
+`stampla undo`. Nothing is ever overwritten.
 
 ## Configuration
 
