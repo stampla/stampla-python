@@ -52,9 +52,14 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
     plan = ImportPlan(algorithm=config.pattern.digest)
     report = plan.report
 
-    files = [
-        path for path in sorted(card.rglob("*")) if path.is_file() and not path.name.startswith(".")
-    ]
+    files: list[Path] = []
+    for path in sorted(card.rglob("*")):
+        if not path.is_file():
+            continue
+        if any(part.startswith(".") for part in path.relative_to(card).parts):
+            report.add(Finding(Bucket.IGNORED, path, "hidden path; not imported"))
+            continue
+        files.append(path)
     report.scanned = len(files)
     camera_extensions = (config.raw_extensions - {"tif", "tiff"}) | config.video_extensions
     groups = group_originals(files, config.sidecar_dirs, camera_extensions)
@@ -84,7 +89,7 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
     )
     with ExifTool() as tool:
         metadata = tool.read_metadata(master_paths, tags) if master_paths else {}
-    digests, hash_errors = hash_files(master_paths, [plan.algorithm], workers=workers)
+    digests, hash_errors = hash_files(files, [plan.algorithm], workers=workers)
 
     moves: list[FamilyMove] = []
     for group in groups:
@@ -108,19 +113,31 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
         digest = digests[master][plan.algorithm]
         prefix = config.pattern.build_prefix(resolved.value, digest)
         destination = root / tree.path / _render_layout(tree.layout, resolved)
-        renames, clash = _group_renames(group, prefix, destination)
-        if clash is not None:
-            report.add(
-                Finding(
-                    Bucket.COLLISION,
-                    master,
-                    f"target already exists: {clash} (already imported?)",
-                    related=tuple(m for m in group.members if m != master),
+        renames = _member_targets(group, prefix, destination)
+        if any(rename.new.exists() for rename in renames):
+            problems = _compare_with_archive(renames, digests, plan.algorithm)
+            if problems:
+                report.add(
+                    Finding(
+                        Bucket.COLLISION,
+                        master,
+                        "in archive but NOT identical: " + "; ".join(problems),
+                        related=tuple(m for m in group.members if m != master),
+                    )
                 )
-            )
+            else:
+                report.add(
+                    Finding(
+                        Bucket.ALREADY_IMPORTED,
+                        master,
+                        f"identical content already in archive ({destination / prefix}*)",
+                        related=tuple(m for m in group.members if m != master),
+                    )
+                )
             continue
         moves.append(FamilyMove(key=prefix, renames=tuple(renames)))
-        plan.expected[destination / f"{prefix}.{master.suffix.lstrip('.').lower()}"] = digest
+        for rename in renames:
+            plan.expected[rename.new] = digests[rename.old][plan.algorithm]
         report.ok += 1
 
     plan.moves = tuple(moves)
@@ -147,7 +164,6 @@ def apply_import(plan: ImportPlan, root: Path, journal_dir: Path | None = None) 
             continue  # its group failed above
         actual = compute_digests(target, [plan.algorithm])[plan.algorithm]
         if actual != expected:
-            report.ok -= 1
             report.add(
                 Finding(
                     Bucket.CORRUPTION,
@@ -193,10 +209,8 @@ def _master_of(
     return loose[0] if len(loose) == 1 else None
 
 
-def _group_renames(
-    group: OriginalGroup, prefix: str, destination: Path
-) -> tuple[list[Rename], Path | None]:
-    """Every member's copy, or the first destination that already exists."""
+def _member_targets(group: OriginalGroup, prefix: str, destination: Path) -> list[Rename]:
+    """Where every group member would land in the archive."""
     renames: list[Rename] = []
     for member in group.members:
         remainder = member.name[len(group.base) :]
@@ -204,11 +218,31 @@ def _group_renames(
         new_name = f"{prefix}{suffix}{dot}{extensions.lower()}"
         in_sidecar_dir = member.parent != group.directory
         target_dir = destination / member.parent.name if in_sidecar_dir else destination
-        target = target_dir / new_name
-        if target.exists():
-            return [], target
-        renames.append(Rename(old=member, new=target))
-    return renames, None
+        renames.append(Rename(old=member, new=target_dir / new_name))
+    return renames
+
+
+def _compare_with_archive(
+    renames: list[Rename], digests: dict[Path, dict[str, str]], algorithm: str
+) -> list[str]:
+    """How a partially/fully imported group differs from the archive.
+
+    Empty means every member already sits in the archive with identical
+    content — the card copy is redundant and safe to lose.
+    """
+    problems: list[str] = []
+    for rename in renames:
+        if not rename.new.is_file():
+            problems.append(f"{rename.new.name} is missing from the archive")
+            continue
+        card_digest = digests.get(rename.old, {}).get(algorithm)
+        if card_digest is None:
+            problems.append(f"{rename.old.name} could not be hashed")
+            continue
+        archive_digest = compute_digests(rename.new, [algorithm])[algorithm]
+        if archive_digest != card_digest:
+            problems.append(f"{rename.new.name} differs from the card version")
+    return problems
 
 
 def _render_layout(layout: str, resolved: ResolvedDate) -> Path:

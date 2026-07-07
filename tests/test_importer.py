@@ -98,15 +98,69 @@ class TestImportEndToEnd:
         assert photo.exists()
         assert (card / "DSC_1234.xmp").exists()
 
-    def test_second_import_reports_collision(self, archive: Path, tmp_path: Path) -> None:
+    def test_reimport_is_the_clearance_check(self, archive: Path, tmp_path: Path) -> None:
         card = tmp_path / "card"
         make_card_photo(card, "DSC_1234", "2026:07:01 10:00:00")
+        (card / "DSC_1234.xmp").write_text("<x:xmpmeta/>")
         assert run_import(archive, card, "--apply")[0] == 0
+
+        # everything already in the archive with identical content: exit 0
         code, payload = run_import(archive, card, "--apply")
+        assert code == 0
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        assert findings[0]["bucket"] == "already-imported"
+
+    def test_differing_archive_copy_is_a_collision(self, archive: Path, tmp_path: Path) -> None:
+        card = tmp_path / "card"
+        make_card_photo(card, "DSC_1234", "2026:07:01 10:00:00")
+        sidecar = card / "DSC_1234.xmp"
+        sidecar.write_text("<x:xmpmeta/>")
+        assert run_import(archive, card, "--apply")[0] == 0
+
+        # the archive sidecar evolves (edits) — the card version now differs
+        month = archive / "Photos" / "2026" / "2026-07"
+        archived_sidecar = next(month.glob("*.xmp"))
+        archived_sidecar.write_text("<x:xmpmeta edited/>")
+
+        code, payload = run_import(archive, card)
         assert code == 1
         findings = payload["findings"]
         assert isinstance(findings, list)
         assert findings[0]["bucket"] == "collision"
+        assert "differs" in str(findings[0]["detail"])
+
+    def test_partially_imported_family_is_a_collision(self, archive: Path, tmp_path: Path) -> None:
+        card = tmp_path / "card"
+        make_card_photo(card, "DSC_1234", "2026:07:01 10:00:00")
+        (card / "DSC_1234.xmp").write_text("<x:xmpmeta/>")
+        assert run_import(archive, card, "--apply")[0] == 0
+
+        month = archive / "Photos" / "2026" / "2026-07"
+        next(month.glob("*.xmp")).unlink()
+
+        code, payload = run_import(archive, card)
+        assert code == 1
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        assert findings[0]["bucket"] == "collision"
+        assert "missing" in str(findings[0]["detail"])
+
+    def test_hidden_paths_are_reported_not_silently_skipped(
+        self, archive: Path, tmp_path: Path
+    ) -> None:
+        card = tmp_path / "card"
+        make_card_photo(card, "DSC_1234", "2026:07:01 10:00:00")
+        trash = card / ".Trashes" / "501"
+        trash.mkdir(parents=True)
+        (trash / "leftover.jpg").write_bytes(TINY_JPEG)
+
+        code, payload = run_import(archive, card, "--apply")
+        assert code == 0  # hidden junk is visible but not blocking
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        assert findings[0]["bucket"] == "ignored"
+        assert "leftover.jpg" in str(findings[0]["path"])
 
     def test_undated_file_is_skipped_not_imported(self, archive: Path, tmp_path: Path) -> None:
         card = tmp_path / "card"

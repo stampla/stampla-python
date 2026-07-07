@@ -13,6 +13,7 @@ from stampla.config import Config, ConfigError, load_config
 from stampla.exiftool import ExifToolError
 from stampla.importer import apply_import, build_plan
 from stampla.journal import Journal, list_journals
+from stampla.report import Bucket
 from stampla.verify import VerifyOptions, run_verify
 
 
@@ -142,7 +143,15 @@ def _run_import_command(args: argparse.Namespace) -> int:
         print(report.render_text())
         if not args.apply and plan.moves:
             print(f"\ndry run: {len(plan.moves)} group(s) would be imported; pass --apply to copy")
-    return 1 if report.has_findings else 0
+        elif not report.has_problems:
+            already = sum(1 for f in report.findings if f.bucket is Bucket.ALREADY_IMPORTED)
+            ignored = sum(1 for f in report.findings if f.bucket is Bucket.IGNORED)
+            hidden = f", {ignored} hidden file(s) ignored (listed above)" if ignored else ""
+            print(
+                f"\ncard fully accounted for: {report.ok} group(s) imported and verified,"
+                f" {already} already in the archive{hidden} — safe to format"
+            )
+    return 1 if report.has_problems else 0
 
 
 def _config_and_root(args: argparse.Namespace) -> tuple[Config, Path]:

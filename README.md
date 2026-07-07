@@ -40,12 +40,19 @@ dry run: 1 group(s) would be imported; pass --apply to copy
 Masters travel with their sidecars and labeled derivatives as one group.
 Import **copies** — files on the card are never modified or removed, so
 the card stays a backup until you format it in the camera. Every copied
-master is re-hashed at its destination and compared with the digest read
-from the card, so a transfer error cannot slip through. Files whose
-capture time cannot be resolved, and groups whose target names already
-exist (a re-inserted card), are reported and skipped without blocking
-the rest. Nothing changes without `--apply`, and every apply is
-journaled and revertable with `stampla undo`.
+file is re-hashed at its destination and compared with the digest read
+from the card, so a transfer error cannot slip through. Nothing changes
+without `--apply`, and every apply is journaled and revertable with
+`stampla undo`.
+
+**Exit code 0 means the card is fully accounted for** — every file was
+either copied and verified now, or already sits in the archive with
+byte-identical content, or is hidden-directory junk explicitly listed as
+ignored. Anything else (unresolvable capture time, a same-name file in
+the archive with *different* content, a family only partially present)
+exits 1 and blocks the "safe to format" verdict. Re-running `import`
+after an import is therefore the pre-format check: when it prints
+*safe to format*, nothing on the card exists only on the card.
 
 ### verify
 

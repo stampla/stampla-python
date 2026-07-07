@@ -25,6 +25,13 @@ class Bucket(Enum):
     AMBIGUOUS_MASTER = "ambiguous-master"
     METADATA_UNREADABLE = "metadata-unreadable"
     HASH_ERROR = "hash-error"
+    ALREADY_IMPORTED = "already-imported"
+    IGNORED = "ignored"
+
+
+#: Findings that describe a safe, fully accounted-for state rather than a
+#: problem. They never fail an import's exit code.
+SAFE_BUCKETS = frozenset({Bucket.ALREADY_IMPORTED, Bucket.IGNORED})
 
 
 #: Rendering order: alarms first, expected drift and inventory last.
@@ -40,6 +47,8 @@ _BUCKET_ORDER = (
     Bucket.MALFORMED,
     Bucket.EDIT_DRIFT,
     Bucket.UNNAMED,
+    Bucket.ALREADY_IMPORTED,
+    Bucket.IGNORED,
 )
 
 
@@ -70,6 +79,11 @@ class Report:
     @property
     def has_findings(self) -> bool:
         return bool(self.findings)
+
+    @property
+    def has_problems(self) -> bool:
+        """Whether any finding describes something other than a safe state."""
+        return any(finding.bucket not in SAFE_BUCKETS for finding in self.findings)
 
     def counts(self) -> dict[str, int]:
         result: dict[str, int] = {}
