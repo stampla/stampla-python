@@ -85,3 +85,20 @@ A filename that starts like a known prefix but violates the rest of the
 grammar (stray characters before the extension, uppercase extension,
 chained extra extensions) is reported as *malformed* — distinct from files
 that are simply not named canonically at all.
+
+## Reading metadata
+
+All metadata comes from [ExifTool](https://exiftool.org/), run as one
+persistent process (`-stay_open`) so that querying thousands of files does
+not pay its startup cost per file. No Python EXIF library is used: the
+formats that matter most (current RAW variants, video containers) are
+exactly where such libraries silently return nothing, and a silently
+missing date is the failure mode stampla exists to prevent.
+
+Queries always use `-a -G1`, because the same tag name routinely appears
+several times in one file with different meanings. A video may carry a
+maker-notes `CreateDate` in local wall-clock time *and* a QuickTime
+`CreateDate` in UTC; without group qualification, which one is returned is
+an accident of tag priority. Downstream logic therefore always sees
+group-qualified tags (`Nikon:CreateDate`, `QuickTime:CreateDate`) and can
+rank them deliberately.
