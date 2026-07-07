@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from stampla.dates import UnresolvedDate, resolve_date
 from stampla.exiftool import ExifTool
 from stampla.family import Family, group_by_prefix
 from stampla.hashing import hash_files
-from stampla.manifest import Manifest
+from stampla.manifest import Manifest, ManifestError
 from stampla.pattern import NamingPattern
 from stampla.report import Bucket, Finding, Report
 from stampla.scan import FileStatus, ScannedFile, scan_tree
@@ -121,7 +122,10 @@ def _verify_tree(
         to_hash = candidates
         if manifest is not None and not options.full:
             for path in candidates:
-                cached = manifest.lookup(path, algorithm)
+                try:
+                    cached = manifest.lookup(path, algorithm)
+                except ManifestError:
+                    continue  # uncacheable path; hash it every time
                 if cached is not None:
                     digests[path] = cached
             to_hash = [path for path in candidates if path not in digests]
@@ -130,7 +134,8 @@ def _verify_tree(
             for path, result in raw_digests.items():
                 digests[path] = result[algorithm]
                 if manifest is not None:
-                    manifest.record(path, algorithm, result[algorithm])
+                    with suppress(ManifestError):
+                        manifest.record(path, algorithm, result[algorithm])
 
     derived_owners: dict[str, list[Path]] = defaultdict(list)
     for family in families:

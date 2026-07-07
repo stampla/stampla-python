@@ -108,8 +108,9 @@ class Manifest:
 
     def record(self, path: Path, algorithm: str, digest: str) -> None:
         """Store a freshly computed digest with the file's current stat."""
+        key = self._key(path)
         stat = path.stat()
-        self._entries[self._key(path)] = ManifestEntry(
+        self._entries[key] = ManifestEntry(
             size=stat.st_size,
             mtime_ns=stat.st_mtime_ns,
             algo=algorithm,

@@ -46,7 +46,8 @@ class TestJson:
         payload = json.loads(sample_report().to_json())
         assert payload["summary"]["ok"] == 2
         assert payload["summary"]["corruption"] == 1
-        assert payload["findings"][2]["related"] == ["a/z.nef"]
+        # paths are rendered in the platform's native form
+        assert payload["findings"][2]["related"] == [str(Path("a/z.nef"))]
 
 
 class TestMerge:

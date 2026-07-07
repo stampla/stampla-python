@@ -117,9 +117,12 @@ class TestFormat:
         assert len(Manifest.load(root)) == 0
 
     def test_tab_in_path_is_rejected(self, root: Path) -> None:
+        # No file is created: Windows cannot even represent this name,
+        # and rejection must not depend on the file existing.
         weird = root / "Photos" / "a\tb.nef"
-        weird.write_bytes(b"x")
         manifest = Manifest.load(root)
+        with pytest.raises(ManifestError, match="tab"):
+            manifest.lookup(weird, "md5")
         with pytest.raises(ManifestError, match="tab"):
             manifest.record(weird, "md5", "abc123")
 
