@@ -9,7 +9,8 @@ happened:
 
 ```
 20260703_150727_9b677b64.nef
-└─ capture time ─┘└ hash ┘
+└──────┬──────┘ └──┬───┘
+  capture time    hash
 ```
 
 The name encodes the capture time (local wall clock, from camera metadata via
