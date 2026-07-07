@@ -11,6 +11,10 @@ license-files = ["LICENSE"]
 authors = [{ name = "Jakub Stefanski", email = "js@jakubstefanski.com" }]
 requires-python = ">=3.11"
 dynamic = ["version"]
+dependencies = [
+    # Windows has no system timezone database for zoneinfo
+    "tzdata; sys_platform == 'win32'",
+]
 keywords = ["photography", "video", "exif", "rename", "archive", "checksum", "raw", "sidecar"]
 classifiers = [
     "Development Status :: 3 - Alpha",

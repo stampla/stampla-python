@@ -1,0 +1,66 @@
+# Example stampla configuration.
+#
+# Everything here is optional; omitted settings keep their built-in
+# defaults. Tables merge with the defaults key by key, arrays replace
+# them wholesale.
+
+# Archive root. Can also be given on the command line.
+root = "/mnt/archive"
+
+# Glob patterns to leave alone entirely.
+excludes = ["**/CaptureOne/**", "*.cot"]
+
+# Subtrees of the root, each holding one kind of media. Files are filed
+# into `layout` (tokens: {yyyy}, {mm}, {dd}) under the tree.
+[[trees]]
+path = "Photos"
+media = "photo"
+layout = "{yyyy}/{yyyy}-{mm}"
+
+[[trees]]
+path = "Video"
+media = "video"
+layout = "{yyyy}/{yyyy}-{mm}"
+
+# The naming pattern: <datetime><separator><digest slice>.
+[pattern]
+name = "md5-8"
+datetime_format = "%Y%m%d_%H%M%S"
+digest = "md5"
+digest_length = 8
+
+# Legacy patterns still present in the archive, e.g. while migrating
+# to a longer digest:
+#
+# [[pattern.legacy]]
+# name = "md5-6"
+# digest_length = 6
+
+[dates]
+# Timezone used when only a UTC timestamp is available for a file.
+timezone = "Europe/Warsaw"
+# Metadata fields tried in order until one yields a capture time
+# (ExifTool tag names; an optional "Group:" prefix pins the tag group).
+photo = ["EXIF:DateTimeOriginal", "EXIF:CreateDate", "XMP:DateCreated"]
+video = ["DateTimeOriginal", "CreateDate", "QuickTime:CreateDate"]
+
+[extensions]
+# Master extensions that sidecars may append to (prefix.nef.xmp).
+raw = ["nef", "cr2", "cr3", "raf", "rw2", "dng", "arw", "tif", "tiff"]
+# Formats edited in place: a content change is an edit, not corruption.
+mutable = ["dng", "tif", "tiff", "jpg", "jpeg", "psd",
+           "xmp", "pp3", "acr", "nksc", "fp2", "fp3", "vrd", "spd"]
+
+# Sidecars kept in a subdirectory beside their masters
+# (<dir>/NKSC_PARAM/<master>.nksc belongs to <dir>/<master>).
+[[sidecar_dirs]]
+subdir = "NKSC_PARAM"
+strip = ".nksc"
+
+# Optional: a DAM renames masters it manages in the listed trees itself;
+# stampla deposits the computed name into `token_tag` and the DAM
+# renames from that token (works with Adobe Lightroom Classic's
+# "Job Identifier" filename token).
+[dam]
+token_tag = "XMP-photoshop:TransmissionReference"
+trees = ["Photos"]

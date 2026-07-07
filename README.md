@@ -40,12 +40,29 @@ Safety first: every command is a dry run unless explicitly applied, renames
 are journaled and undoable, and a file whose capture time cannot be resolved
 is reported, never renamed.
 
+## Configuration
+
+An archive is described by a TOML file (see
+[examples/config.toml](examples/config.toml)); every setting has a
+sensible default:
+
+| section | what it configures |
+|---|---|
+| `[[trees]]` | archive subtrees, their media kind and directory layout |
+| `[pattern]` | the naming pattern: datetime format, digest, slice length — plus legacy patterns still recognized during a migration |
+| `[dates]` | metadata fields tried in order to resolve capture time, and the timezone for UTC-only sources |
+| `[extensions]` | which extensions are RAW masters, and which formats are edited in place |
+| `[[sidecar_dirs]]` | sidecars kept in subdirectories beside their masters |
+| `excludes` | glob patterns never to touch |
+| `[dam]` | hand off renaming of DAM-managed masters via a metadata token |
+
 ## Requirements
 
 - Python 3.11+
 - [ExifTool](https://exiftool.org/) on `PATH`
 
-No Python package dependencies.
+No Python package dependencies (on Windows, `tzdata` is pulled in for the
+timezone database).
 
 ## License
 
