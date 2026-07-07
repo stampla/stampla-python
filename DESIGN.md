@@ -156,3 +156,27 @@ merges into the shorter group only when the shorter group has a
 camera-native master and the labeled group does not — editor output like
 `DSC1234-Edit.tif` travels with its RAW, while `IMG_01.NEF` is never
 mistaken for a derivative of `IMG.NEF`.
+
+## Verification
+
+Because names are pure functions of the file, verification is just
+re-derivation: resolve the capture time, hash the content, rebuild the
+prefix and compare. What makes verify useful is the classification of
+disagreements:
+
+| bucket | meaning |
+|---|---|
+| `corruption` | content hash differs on a write-once format — alarm |
+| `edit-drift` | content hash differs on a format edited in place — expected; the name is stale until re-named |
+| `date-mismatch` | the name's timestamp disagrees with metadata |
+| `unresolved-date` | no chain entry yields a capture time — the file can never be auto-named |
+| `collision` | two masters derive the same name, i.e. duplicate content |
+| `ambiguous-master` | several same-prefix master candidates and content settles nothing |
+| `orphan-family` | sidecars whose master is gone |
+| `malformed` / `unnamed` | inventory of files outside the scheme |
+
+Only the master of each family is hashed and dated — sidecars and
+derivatives inherit the master's prefix by definition, so their names are
+right exactly when their master's is. Ambiguous families (a RAW plus a
+conversion carrying the same prefix) are settled by evidence: the
+candidate whose content hash matches the prefix is the master.

@@ -41,6 +41,26 @@ DEFAULT_MUTABLE_EXTENSIONS = frozenset(
     }
 )
 
+DEFAULT_VIDEO_EXTENSIONS = frozenset(
+    {
+        "mov",
+        "mp4",
+        "m4v",
+        "avi",
+        "mkv",
+        "braw",
+        "nev",
+        "r3d",
+        "mts",
+        "m2ts",
+        "3gp",
+        "wmv",
+        "asf",
+        "mpg",
+        "mpeg",
+    }
+)
+
 DEFAULT_DATE_CHAIN_PHOTO = (
     "EXIF:DateTimeOriginal",
     "EXIF:CreateDate",
@@ -132,6 +152,7 @@ class Config:
     date_chain_photo: tuple[str, ...] = DEFAULT_DATE_CHAIN_PHOTO
     date_chain_video: tuple[str, ...] = DEFAULT_DATE_CHAIN_VIDEO
     raw_extensions: frozenset[str] = DEFAULT_RAW_EXTENSIONS
+    video_extensions: frozenset[str] = DEFAULT_VIDEO_EXTENSIONS
     mutable_extensions: frozenset[str] = DEFAULT_MUTABLE_EXTENSIONS
     sidecar_dirs: tuple[SidecarDirRule, ...] = (SidecarDirRule(subdir="NKSC_PARAM", strip=".nksc"),)
     excludes: tuple[str, ...] = ()
@@ -265,10 +286,12 @@ def _dates_from_dict(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _extensions_from_dict(data: dict[str, Any]) -> dict[str, Any]:
-    _reject_unknown_keys(data, {"raw", "mutable"}, context="extensions")
+    _reject_unknown_keys(data, {"raw", "video", "mutable"}, context="extensions")
     result: dict[str, Any] = {}
     if "raw" in data:
         result["raw_extensions"] = frozenset(_string_list(data["raw"], "extensions.raw"))
+    if "video" in data:
+        result["video_extensions"] = frozenset(_string_list(data["video"], "extensions.video"))
     if "mutable" in data:
         result["mutable_extensions"] = frozenset(
             _string_list(data["mutable"], "extensions.mutable")

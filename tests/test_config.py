@@ -141,6 +141,11 @@ class TestMergeSemantics:
         config = config_from_dict({"extensions": {"raw": ["nef"]}})
         assert config.raw_extensions == frozenset({"nef"})
         assert config.mutable_extensions == Config().mutable_extensions
+        assert config.video_extensions == Config().video_extensions
+
+    def test_video_extensions(self) -> None:
+        config = config_from_dict({"extensions": {"video": ["mov", "mp4"]}})
+        assert config.video_extensions == frozenset({"mov", "mp4"})
 
     def test_tzinfo_property(self) -> None:
         config = config_from_dict({"dates": {"timezone": "Europe/Warsaw"}})

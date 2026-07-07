@@ -47,6 +47,8 @@ video = ["DateTimeOriginal", "CreateDate", "QuickTime:CreateDate"]
 [extensions]
 # Master extensions that sidecars may append to (prefix.nef.xmp).
 raw = ["nef", "cr2", "cr3", "raf", "rw2", "dng", "arw", "tif", "tiff"]
+# Video containers treated as masters in video trees.
+video = ["mov", "mp4", "braw", "nev", "r3d", "avi", "mkv"]
 # Formats edited in place: a content change is an edit, not corruption.
 mutable = ["dng", "tif", "tiff", "jpg", "jpeg", "psd",
            "xmp", "pp3", "acr", "nksc", "fp2", "fp3", "vrd", "spd"]
