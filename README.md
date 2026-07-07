@@ -111,12 +111,38 @@ fabricates sidecars, because a DAM reading a minimal script-made file
 could wipe catalog-side metadata. Save metadata from the DAM first,
 then rerun.
 
+### rename
+
+Direct renames, for what no DAM manages: whole families in unmanaged
+trees (fixing a wrong capture date renames the master and every sidecar
+atomically), and — in DAM-managed trees — only the members the DAM does
+not know about, while `inject` handles the master. Also fixes names that
+differ from canonical only by extension case (`.FP2` → `.fp2`).
+
+```console
+$ stampla rename --config archive.toml
+  /archive/Video/2025/2025-06/20250615_140910_388ec696.mov  would become 20250615_160910_388ec696.mov
+
+dry run: 1 rename(s) planned; pass --apply to execute
+```
+
+Every apply is validated as a whole first, journaled before the first
+change, applied atomically per family, and revertable with
+`stampla undo`.
+
+### organize
+
+Triage for the messy tree every archive drags along. Runs the import
+planning over it and reports, without ever renaming: what each group
+would be named and where it would go, what is already in the archive,
+which groups duplicate each other, what could only be dated from file
+modification time (proposed, but flagged — mtime is hearsay), and what
+is unresolvable. There is no `--apply`; import confirmed batches with
+`stampla import`.
+
 ## Status
 
-Early development. Planned next:
-
-- `organize` — audit a messy directory tree and produce a triage report,
-  without touching anything
+Early development.
 
 Safety first: every command is a dry run unless explicitly applied, and a
 file whose capture time cannot be resolved is reported, never renamed.

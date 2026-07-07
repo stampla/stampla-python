@@ -45,6 +45,8 @@ class ImportPlan:
     report: Report = field(default_factory=Report)
     #: expected digest of each copied master at its destination
     expected: dict[Path, str] = field(default_factory=dict)
+    #: which metadata tag dated each planned master
+    date_sources: dict[Path, str] = field(default_factory=dict)
 
 
 def build_plan(config: Config, root: Path, card: Path, workers: int | None = None) -> ImportPlan:
@@ -117,6 +119,7 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
         if not isinstance(resolved, ResolvedDate):
             report.add(Finding(Bucket.UNRESOLVED_DATE, master, resolved.reason))
             continue
+        plan.date_sources[master] = resolved.source
 
         members = group.members
         if config.skip_jpeg_twins and master.suffix.lstrip(".").lower() in config.raw_extensions:

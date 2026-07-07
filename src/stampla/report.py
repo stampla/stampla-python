@@ -33,6 +33,7 @@ class Bucket(Enum):
     OTHER_PATTERN = "other-pattern"
     RENAME_PENDING = "rename-pending"
     RENAMED = "renamed"
+    MTIME_DATED = "mtime-dated"
 
 
 #: Findings that describe a safe, fully accounted-for state rather than a
@@ -61,6 +62,7 @@ _BUCKET_ORDER = (
     Bucket.ORPHAN_FAMILY,
     Bucket.NEEDS_SIDECAR,
     Bucket.OTHER_PATTERN,
+    Bucket.MTIME_DATED,
     Bucket.MALFORMED,
     Bucket.EDIT_DRIFT,
     Bucket.UNNAMED,

@@ -14,6 +14,7 @@ from stampla.dam import InjectOptions, run_inject
 from stampla.exiftool import ExifToolError
 from stampla.importer import apply_import, build_plan
 from stampla.journal import Journal, list_journals
+from stampla.organize import run_organize
 from stampla.renamer import RenameOptions, run_rename
 from stampla.report import Bucket
 from stampla.verify import VerifyOptions, run_verify
@@ -92,6 +93,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     inject.add_argument("--workers", type=int, help="parallel hashing processes")
 
+    organize = subparsers.add_parser(
+        "organize",
+        help="triage a messy tree: propose names, flag duplicates; never renames",
+    )
+    organize.add_argument("path", type=Path, help="messy directory to analyze")
+    organize.add_argument("--config", type=Path, help="TOML configuration file")
+    organize.add_argument("--root", type=Path, help="archive root (overrides the config)")
+    organize.add_argument("--json", action="store_true", help="machine-readable output")
+    organize.add_argument("--workers", type=int, help="parallel hashing processes")
+
     rename = subparsers.add_parser(
         "rename",
         help="rename files whose derived name differs, through the journaled engine",
@@ -136,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_inject_command(args)
         if args.command == "rename":
             return _run_rename_command(args)
+        if args.command == "organize":
+            return _run_organize_command(args)
         return _run_verify_command(args)
     except (ConfigError, ExifToolError, ValueError, OSError) as error:
         print(f"stampla: {error}", file=sys.stderr)
@@ -197,6 +210,33 @@ def _run_import_command(args: argparse.Namespace) -> int:
                 f"\ncard fully accounted for: {report.ok} group(s) imported and verified,"
                 f" {already} already in the archive{skipped} — safe to format"
             )
+    return 1 if report.has_problems else 0
+
+
+def _run_organize_command(args: argparse.Namespace) -> int:
+    config, root = _config_and_root(args)
+    report, plan = run_organize(config, root.resolve(), args.path, workers=args.workers)
+    if args.json:
+        payload = json.loads(report.to_json())
+        payload["proposals"] = [
+            {
+                "group": move.key,
+                "files": [[str(r.old), str(r.new)] for r in move.renames],
+            }
+            for move in plan.moves
+        ]
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        for move in plan.moves:
+            for rename in move.renames:
+                print(f"  {rename.old}  ->  {rename.new}")
+        if plan.moves:
+            print()
+        print(report.render_text())
+        print(
+            f"\n{len(plan.moves)} group(s) look importable; organize never renames —"
+            " import confirmed batches with: stampla import <path> --apply"
+        )
     return 1 if report.has_problems else 0
 
 
