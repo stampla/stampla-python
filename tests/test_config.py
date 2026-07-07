@@ -28,11 +28,24 @@ class TestDefaults:
         assert config.raw_extensions == DEFAULT_RAW_EXTENSIONS
         assert config.dam is None
 
-    def test_grammar_includes_legacy_patterns(self) -> None:
+    def test_grammar_includes_additional_patterns(self) -> None:
         config = config_from_dict(
-            {"pattern": {"name": "md5-12", "digest_length": 12, "legacy": [{"name": "md5-8"}]}}
+            {"pattern": {"name": "md5-12", "digest_length": 12, "additional": [{"name": "md5-8"}]}}
         )
         assert [p.name for p in config.grammar.patterns] == ["md5-12", "md5-8"]
+
+    def test_pattern_image_hash(self) -> None:
+        config = config_from_dict(
+            {"pattern": {"name": "md5-hybrid", "image_hash": ["dng", "tif", "jpg"]}}
+        )
+        assert config.pattern.digest_source_for("dng") == "image"
+        assert config.pattern.digest_source_for("NEF") == "file"
+
+    def test_additional_pattern_rejects_unknown_keys(self) -> None:
+        with pytest.raises(ConfigError, match="additional"):
+            config_from_dict(
+                {"pattern": {"name": "a", "additional": [{"name": "b", "legacy": []}]}}
+            )
 
     def test_empty_dict_gives_defaults(self) -> None:
         assert config_from_dict({}) == Config()

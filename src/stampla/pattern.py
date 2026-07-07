@@ -3,8 +3,8 @@
 A pattern turns a capture time and a content digest into a name prefix such
 as ``20260703_150727_9b677b64`` and recognizes such prefixes in existing
 names. Several patterns can be active at once — the current one plus any
-legacy ones — so files can be classified consistently while an archive
-migrates between schemes.
+additional recognized ones — so files can be classified consistently
+while an archive migrates between schemes.
 """
 
 from __future__ import annotations
@@ -57,11 +57,22 @@ def _compile_datetime_format(fmt: str) -> tuple[str, int]:
     return "".join(parts), width
 
 
+#: digests ExifTool can compute over image data only
+_IMAGE_HASH_DIGESTS = frozenset({"md5", "sha256", "sha512"})
+
+
 @dataclass(frozen=True)
 class NamingPattern:
     """A single naming scheme: datetime format, digest algorithm and length.
 
     The default values describe ``YYYYMMDD_hhmmss_<md5:8>``.
+
+    ``image_hash`` lists extensions whose digest is computed over the
+    image data only (metadata excluded), so that names of formats edited
+    in place — keywords, ratings, rename tokens — never drift. All other
+    extensions use the whole file. The mapping is part of the pattern's
+    identity: changing it changes what every name means, i.e. it defines
+    a new pattern and calls for a migration.
     """
 
     name: str
@@ -69,10 +80,18 @@ class NamingPattern:
     digest: str = "md5"
     digest_length: int = 8
     separator: str = "_"
+    image_hash: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if not self.name:
             raise PatternError("pattern name must not be empty")
+        for extension in self.image_hash:
+            if not re.fullmatch(r"[a-z0-9]+", extension):
+                raise PatternError(f"invalid image_hash extension {extension!r}")
+        if self.image_hash and self.digest not in _IMAGE_HASH_DIGESTS:
+            raise PatternError(
+                f"image-data hashing supports {sorted(_IMAGE_HASH_DIGESTS)}, not {self.digest!r}"
+            )
         try:
             digest_size = hashlib.new(self.digest).digest_size
         except (ValueError, TypeError) as exc:
@@ -128,6 +147,10 @@ class NamingPattern:
     def digest_of(self, prefix: str) -> str:
         """Extract the digest slice encoded in a prefix."""
         return prefix[self.datetime_length + len(self.separator) :]
+
+    def digest_source_for(self, extension: str) -> str:
+        """``image`` or ``file``: what this pattern hashes for the extension."""
+        return "image" if extension.lower() in self.image_hash else "file"
 
 
 DEFAULT_PATTERN = NamingPattern(name="md5-8")

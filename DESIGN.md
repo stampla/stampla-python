@@ -47,10 +47,12 @@ A *pattern* defines the identity part of a filename — the **prefix**:
   32-character limit, which DAM integrations use as a rename token.
 
 Multiple patterns can be recognized simultaneously. The grammar tries the
-current pattern first, then legacy ones, so an archive migrating from, say,
-`md5:8` to `sha256:12` names remains fully classifiable mid-transition:
-every file is either canonical under the current pattern, valid under a
-legacy pattern (pending migration), or not canonically named at all.
+primary pattern first, then any additional recognized ones, so an archive
+migrating from, say, `md5:8` to `sha256:12` names remains fully classifiable
+mid-transition: every file is either canonical under the primary pattern,
+valid under an additional pattern (reported as pending migration — a mixed
+archive is a loudly temporary state, never a comfortable one), or not
+canonically named at all.
 
 ## Filename grammar
 

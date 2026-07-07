@@ -39,10 +39,15 @@ datetime_format = "%Y%m%d_%H%M%S"
 digest = "md5"
 digest_length = 8
 
-# Legacy patterns still present in the archive, e.g. while migrating
-# to a longer digest:
+# Extensions hashed over image data only (metadata excluded), so names
+# of formats edited in place never drift. Part of the pattern identity:
+# changing this list means a migration.
+# image_hash = ["dng", "tif", "tiff", "jpg", "jpeg", "psd"]
+
+# Additional recognized patterns, e.g. while migrating to a new scheme.
+# Files named under these are reported as pending migration, never OK.
 #
-# [[pattern.legacy]]
+# [[pattern.additional]]
 # name = "md5-6"
 # digest_length = 6
 

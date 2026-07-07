@@ -147,7 +147,7 @@ class Config:
         Tree(path="Video", media="video"),
     )
     pattern: NamingPattern = DEFAULT_PATTERN
-    legacy_patterns: tuple[NamingPattern, ...] = ()
+    additional_patterns: tuple[NamingPattern, ...] = ()
     timezone: str = "UTC"
     date_chain_photo: tuple[str, ...] = DEFAULT_DATE_CHAIN_PHOTO
     date_chain_video: tuple[str, ...] = DEFAULT_DATE_CHAIN_VIDEO
@@ -185,7 +185,7 @@ class Config:
     @property
     def grammar(self) -> Grammar:
         return Grammar(
-            patterns=(self.pattern, *self.legacy_patterns),
+            patterns=(self.pattern, *self.additional_patterns),
             raw_extensions=self.raw_extensions,
         )
 
@@ -232,9 +232,9 @@ def config_from_dict(data: dict[str, Any]) -> Config:
             _tree_from_dict(entry, index) for index, entry in enumerate(data["trees"])
         )
     if "pattern" in data:
-        current, legacy = _patterns_from_dict(_expect(data["pattern"], dict, "pattern"))
-        kwargs["pattern"] = current
-        kwargs["legacy_patterns"] = legacy
+        primary, additional = _patterns_from_dict(_expect(data["pattern"], dict, "pattern"))
+        kwargs["pattern"] = primary
+        kwargs["additional_patterns"] = additional
     if "dates" in data:
         kwargs.update(_dates_from_dict(_expect(data["dates"], dict, "dates")))
     if "extensions" in data:
@@ -265,20 +265,44 @@ def _tree_from_dict(data: Any, index: int) -> Tree:
 def _patterns_from_dict(data: dict[str, Any]) -> tuple[NamingPattern, tuple[NamingPattern, ...]]:
     _reject_unknown_keys(
         data,
-        {"name", "datetime_format", "digest", "digest_length", "separator", "legacy"},
+        {
+            "name",
+            "datetime_format",
+            "digest",
+            "digest_length",
+            "separator",
+            "image_hash",
+            "additional",
+        },
         context="pattern",
     )
     data = dict(data)
-    legacy_entries = data.pop("legacy", [])
+    additional_entries = data.pop("additional", [])
+    if "image_hash" in data:
+        data["image_hash"] = frozenset(_string_list(data["image_hash"], "pattern.image_hash"))
     try:
-        current = NamingPattern(**data)
-        legacy = tuple(
-            NamingPattern(**_expect(entry, dict, f"pattern.legacy[{index}]"))
-            for index, entry in enumerate(legacy_entries)
+        primary = NamingPattern(**data)
+        additional = tuple(
+            NamingPattern(**_normalized_pattern_entry(entry, index))
+            for index, entry in enumerate(additional_entries)
         )
     except (PatternError, TypeError) as exc:
         raise ConfigError(f"pattern: {exc}") from exc
-    return current, legacy
+    return primary, additional
+
+
+def _normalized_pattern_entry(entry: Any, index: int) -> dict[str, Any]:
+    table = dict(_expect(entry, dict, f"pattern.additional[{index}]"))
+    _reject_unknown_keys(
+        table,
+        {"name", "datetime_format", "digest", "digest_length", "separator", "image_hash"},
+        context=f"pattern.additional[{index}]",
+    )
+    if "image_hash" in table:
+        table["image_hash"] = frozenset(
+            _string_list(table["image_hash"], f"pattern.additional[{index}].image_hash")
+        )
+    return table
 
 
 def _dates_from_dict(data: dict[str, Any]) -> dict[str, Any]:

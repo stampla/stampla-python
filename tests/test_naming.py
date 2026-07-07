@@ -105,17 +105,17 @@ class TestRebuild:
 
 
 class TestMultiplePatterns:
-    def test_legacy_pattern_recognized_alongside_current(self) -> None:
+    def test_additional_pattern_recognized_alongside_primary(self) -> None:
         current = NamingPattern(name="sha256-12", digest="sha256", digest_length=12)
         grammar = Grammar(patterns=(current, DEFAULT_PATTERN))
 
         modern = grammar.parse("20260214_125556_1355acb2beef.nef")
-        legacy = grammar.parse("20260214_125556_1355acb2.nef")
+        additional = grammar.parse("20260214_125556_1355acb2.nef")
 
         assert modern is not None
         assert modern.pattern is current
-        assert legacy is not None
-        assert legacy.pattern is DEFAULT_PATTERN
+        assert additional is not None
+        assert additional.pattern is DEFAULT_PATTERN
 
     def test_short_hash_does_not_half_match_long_pattern(self) -> None:
         current = NamingPattern(name="sha256-12", digest="sha256", digest_length=12)

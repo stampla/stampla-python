@@ -55,8 +55,8 @@ class ParsedName:
 class Grammar:
     """Recognizes canonical names under one or more patterns.
 
-    Patterns are tried in order; list the current pattern first and legacy
-    patterns after it.
+    Patterns are tried in order; list the primary pattern first and any
+    additional recognized patterns after it.
     """
 
     patterns: tuple[NamingPattern, ...]

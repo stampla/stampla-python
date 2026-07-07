@@ -134,7 +134,7 @@ sensible default:
 | section | what it configures |
 |---|---|
 | `[[trees]]` | archive subtrees, their media kind and directory layout |
-| `[pattern]` | the naming pattern: datetime format, digest, slice length — plus legacy patterns still recognized during a migration |
+| `[pattern]` | the naming pattern: datetime format, digest, slice length — per-format image-data hashing, plus additional patterns recognized during a migration |
 | `[dates]` | metadata fields tried in order to resolve capture time, and the timezone for UTC-only sources |
 | `[extensions]` | which extensions are RAW masters, and which formats are edited in place |
 | `[[sidecar_dirs]]` | sidecars kept in subdirectories beside their masters |
