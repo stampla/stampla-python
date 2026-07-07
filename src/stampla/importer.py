@@ -17,6 +17,7 @@ skipped; they never abort the rest of the card.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 from stampla.apply import apply_plan, validate_plan
@@ -56,8 +57,12 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
     for path in sorted(card.rglob("*")):
         if not path.is_file():
             continue
-        if any(part.startswith(".") for part in path.relative_to(card).parts):
+        relative = path.relative_to(card)
+        if any(part.startswith(".") for part in relative.parts):
             report.add(Finding(Bucket.IGNORED, path, "hidden path; not imported"))
+            continue
+        if _matches(relative, config.import_ignore):
+            report.add(Finding(Bucket.IGNORED, path, "matches an import ignore pattern"))
             continue
         files.append(path)
     report.scanned = len(files)
@@ -110,10 +115,17 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
             report.add(Finding(Bucket.UNRESOLVED_DATE, master, resolved.reason))
             continue
 
+        members = group.members
+        if config.skip_jpeg_twins and master.suffix.lstrip(".").lower() in config.raw_extensions:
+            twins = tuple(m for m in members if _is_jpeg_twin(m, group.base))
+            members = tuple(m for m in members if m not in twins)
+            for twin in twins:
+                report.add(Finding(Bucket.IGNORED, twin, "JPEG twin of a RAW; skipped by policy"))
         digest = digests[master][plan.algorithm]
         prefix = config.pattern.build_prefix(resolved.value, digest)
         destination = root / tree.path / _render_layout(tree.layout, resolved)
-        renames = _member_targets(group, prefix, destination)
+        trimmed = OriginalGroup(directory=group.directory, base=group.base, members=members)
+        renames = _member_targets(trimmed, prefix, destination)
         if any(rename.new.exists() for rename in renames):
             problems = _compare_with_archive(renames, digests, plan.algorithm)
             if problems:
@@ -122,7 +134,7 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
                         Bucket.COLLISION,
                         master,
                         "in archive but NOT identical: " + "; ".join(problems),
-                        related=tuple(m for m in group.members if m != master),
+                        related=tuple(m for m in members if m != master),
                     )
                 )
             else:
@@ -131,7 +143,7 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
                         Bucket.ALREADY_IMPORTED,
                         master,
                         f"identical content already in archive ({destination / prefix}*)",
-                        related=tuple(m for m in group.members if m != master),
+                        related=tuple(m for m in members if m != master),
                     )
                 )
             continue
@@ -173,6 +185,23 @@ def apply_import(plan: ImportPlan, root: Path, journal_dir: Path | None = None) 
                 )
             )
     return report
+
+
+def _matches(relative: Path, patterns: tuple[str, ...]) -> bool:
+    # memory cards use case-insensitive filesystems, so ignore patterns
+    # match case-insensitively: "*.jpg" covers DSC_0001.JPG
+    posix = relative.as_posix().lower()
+    name = relative.name.lower()
+    return any(
+        fnmatchcase(posix, pattern.lower()) or fnmatchcase(name, pattern.lower())
+        for pattern in patterns
+    )
+
+
+def _is_jpeg_twin(member: Path, base: str) -> bool:
+    """A plain <base>.jpg next to a RAW master — the in-camera preview."""
+    stem, dot, extension = member.name.partition(".")
+    return stem == base and dot == "." and extension.lower() in {"jpg", "jpeg"}
 
 
 def _tree_for(config: Config, media: str) -> Tree | None:

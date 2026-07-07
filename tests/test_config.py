@@ -147,6 +147,19 @@ class TestMergeSemantics:
         config = config_from_dict({"extensions": {"video": ["mov", "mp4"]}})
         assert config.video_extensions == frozenset({"mov", "mp4"})
 
+    def test_import_section(self) -> None:
+        config = config_from_dict({"import": {"ignore": ["NIKON001.DSC"], "skip_jpeg_twins": True}})
+        assert config.import_ignore == ("NIKON001.DSC",)
+        assert config.skip_jpeg_twins is True
+
+    def test_import_defaults(self) -> None:
+        assert Config().import_ignore == ()
+        assert Config().skip_jpeg_twins is False
+
+    def test_import_skip_jpeg_twins_must_be_boolean(self) -> None:
+        with pytest.raises(ConfigError, match="boolean"):
+            config_from_dict({"import": {"skip_jpeg_twins": "yes"}})
+
     def test_tzinfo_property(self) -> None:
         config = config_from_dict({"dates": {"timezone": "Europe/Warsaw"}})
         assert str(config.tzinfo) == "Europe/Warsaw"

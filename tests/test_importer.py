@@ -206,3 +206,92 @@ class TestImportEndToEnd:
             main(["import", str(tmp_path / "no-card"), "--config", str(archive / "config.toml")])
             == 2
         )
+
+
+@requires_exiftool
+class TestImportPolicies:
+    def configure(self, tmp_path: Path, extra: str) -> Path:
+        (tmp_path / "config.toml").write_text(
+            CONFIG_TEMPLATE.format(root=str(tmp_path)).replace('raw = ["jpg"]', 'raw = ["nef"]')
+            + extra
+        )
+        return tmp_path
+
+    def make_raw_jpeg_pair(self, card: Path, base: str, capture: str) -> tuple[Path, Path]:
+        # the "NEF" is a JPEG that gets its EXIF written while still a
+        # .jpg and its extension changed after — reads are content-sniffed,
+        # so dates still resolve; only grouping and policy are under test
+        jpg = make_card_photo(card, base, capture)
+        scratch = make_card_photo(card, f"XRAW{base}", capture, b"raw-payload")
+        raw = card / f"{base}.NEF"
+        scratch.rename(raw)
+        return raw, jpg
+
+    def test_jpeg_twin_skipped_when_policy_enabled(self, tmp_path: Path) -> None:
+        archive = self.configure(tmp_path, "[import]\nskip_jpeg_twins = true\n")
+        card = tmp_path / "card"
+        self.make_raw_jpeg_pair(card, "DSC_0001", "2026:07:05 10:00:00")
+
+        code, payload = run_import(archive, card, "--apply")
+        assert code == 0, payload
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        assert [f["bucket"] for f in findings] == ["ignored"]
+        month = archive / "Photos" / "2026" / "2026-07"
+        assert len(list(month.glob("*.nef"))) == 1
+        assert list(month.glob("*.jpg")) == []
+
+    def test_jpeg_twin_imported_by_default(self, tmp_path: Path) -> None:
+        archive = self.configure(tmp_path, "")
+        card = tmp_path / "card"
+        self.make_raw_jpeg_pair(card, "DSC_0001", "2026:07:05 10:00:00")
+
+        code, _ = run_import(archive, card, "--apply")
+        assert code == 0
+        month = archive / "Photos" / "2026" / "2026-07"
+        assert len(list(month.glob("*.nef"))) == 1
+        assert len(list(month.glob("*.jpg"))) == 1
+
+    def test_standalone_jpeg_still_imports_under_twin_policy(self, tmp_path: Path) -> None:
+        archive = self.configure(tmp_path, "[import]\nskip_jpeg_twins = true\n")
+        card = tmp_path / "card"
+        make_card_photo(card, "DSC_0002", "2026:07:05 11:00:00")  # jpg only, no raw
+
+        code, payload = run_import(archive, card, "--apply")
+        assert code == 0, payload
+        month = archive / "Photos" / "2026" / "2026-07"
+        assert len(list(month.glob("*.jpg"))) == 1
+
+    def test_ignore_globs_are_reported_not_imported(self, tmp_path: Path) -> None:
+        archive = self.configure(tmp_path, '[import]\nignore = ["NIKON001.DSC", "NC_FLLST.DAT"]\n')
+        card = tmp_path / "card"
+        self.make_raw_jpeg_pair(card, "DSC_0001", "2026:07:05 10:00:00")
+        (card / "NIKON001.DSC").write_bytes(b"\0" * 16)
+        dcim = card / "DCIM" / "100NZ502"
+        dcim.mkdir(parents=True)
+        (dcim / "NC_FLLST.DAT").write_bytes(b"\0" * 16)
+
+        code, payload = run_import(archive, card, "--apply")
+        assert code == 0, payload
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        ignored = [Path(str(f["path"])).name for f in findings if f["bucket"] == "ignored"]
+        assert "NIKON001.DSC" in ignored
+        assert "NC_FLLST.DAT" in ignored
+
+    def test_ignore_all_jpegs_case_insensitively(self, tmp_path: Path) -> None:
+        # in-camera RAW processing produces new-numbered JPEGs that are
+        # not twins; a "*.jpg" ignore skips every JPEG regardless of case
+        archive = self.configure(tmp_path, '[import]\nignore = ["*.jpg"]\n')
+        card = tmp_path / "card"
+        self.make_raw_jpeg_pair(card, "DSC_0001", "2026:07:05 10:00:00")
+
+        code, payload = run_import(archive, card, "--apply")
+        assert code == 0, payload
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        assert [f["bucket"] for f in findings] == ["ignored"]
+        assert str(findings[0]["path"]).endswith("DSC_0001.JPG")
+        month = archive / "Photos" / "2026" / "2026-07"
+        assert len(list(month.glob("*.nef"))) == 1
+        assert list(month.glob("*.jpg")) == []

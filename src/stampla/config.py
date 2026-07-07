@@ -156,6 +156,11 @@ class Config:
     mutable_extensions: frozenset[str] = DEFAULT_MUTABLE_EXTENSIONS
     sidecar_dirs: tuple[SidecarDirRule, ...] = (SidecarDirRule(subdir="NKSC_PARAM", strip=".nksc"),)
     excludes: tuple[str, ...] = ()
+    #: card files matching these globs are ignored (and listed) on import
+    import_ignore: tuple[str, ...] = ()
+    #: drop a JPEG whose RAW twin is in the same group; standalone JPEGs
+    #: still import, so a JPEG-only photo can never be lost
+    skip_jpeg_twins: bool = False
     dam: DamConfig | None = None
     root: str | None = None
 
@@ -213,6 +218,7 @@ def config_from_dict(data: dict[str, Any]) -> Config:
         "extensions",
         "sidecar_dirs",
         "excludes",
+        "import",
         "dam",
         "root",
     }
@@ -240,6 +246,8 @@ def config_from_dict(data: dict[str, Any]) -> Config:
         )
     if "excludes" in data:
         kwargs["excludes"] = tuple(_string_list(data["excludes"], "excludes"))
+    if "import" in data:
+        kwargs.update(_import_from_dict(_expect(data["import"], dict, "import")))
     if "dam" in data:
         kwargs["dam"] = _dam_from_dict(_expect(data["dam"], dict, "dam"))
     return Config(**kwargs)
@@ -296,6 +304,19 @@ def _extensions_from_dict(data: dict[str, Any]) -> dict[str, Any]:
         result["mutable_extensions"] = frozenset(
             _string_list(data["mutable"], "extensions.mutable")
         )
+    return result
+
+
+def _import_from_dict(data: dict[str, Any]) -> dict[str, Any]:
+    _reject_unknown_keys(data, {"ignore", "skip_jpeg_twins"}, context="import")
+    result: dict[str, Any] = {}
+    if "ignore" in data:
+        result["import_ignore"] = tuple(_string_list(data["ignore"], "import.ignore"))
+    if "skip_jpeg_twins" in data:
+        value = data["skip_jpeg_twins"]
+        if not isinstance(value, bool):
+            raise ConfigError("import.skip_jpeg_twins must be a boolean")
+        result["skip_jpeg_twins"] = value
     return result
 
 

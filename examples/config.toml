@@ -10,6 +10,16 @@ root = "/mnt/archive"
 # Glob patterns to leave alone entirely.
 excludes = ["**/CaptureOne/**", "*.cot"]
 
+[import]
+# Card files matching these globs are ignored on import (still listed
+# in the report, so nothing disappears silently). Matching is
+# case-insensitive, as memory card filesystems are. Add "*.jpg" here to
+# skip every JPEG, including in-camera RAW conversions.
+ignore = ["NIKON001.DSC", "NC_FLLST.DAT"]
+# Shooting RAW+JPEG only for the in-camera preview? Skip the JPEG when
+# its RAW twin is present. A JPEG without a RAW twin always imports.
+skip_jpeg_twins = false
+
 # Subtrees of the root, each holding one kind of media. Files are filed
 # into `layout` (tokens: {yyyy}, {mm}, {dd}) under the tree.
 [[trees]]
