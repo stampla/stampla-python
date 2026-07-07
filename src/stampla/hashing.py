@@ -47,6 +47,10 @@ def hash_files(
     Returns ``(digests, errors)``: per-path digest mappings for files that
     could be read, and per-path error messages for those that could not.
     Unreadable files are the caller's judgement call, not an exception.
+
+    Worker processes are started with spawn semantics on some platforms,
+    so a script calling this must be importable — keep the call under
+    ``if __name__ == "__main__":`` as with any multiprocessing code.
     """
     digests: dict[Path, dict[str, str]] = {}
     errors: dict[Path, str] = {}
