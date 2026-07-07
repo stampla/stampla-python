@@ -146,10 +146,10 @@ def _run_import_command(args: argparse.Namespace) -> int:
         elif not report.has_problems:
             already = sum(1 for f in report.findings if f.bucket is Bucket.ALREADY_IMPORTED)
             ignored = sum(1 for f in report.findings if f.bucket is Bucket.IGNORED)
-            hidden = f", {ignored} hidden file(s) ignored (listed above)" if ignored else ""
+            skipped = f", {ignored} file(s) ignored (listed above)" if ignored else ""
             print(
                 f"\ncard fully accounted for: {report.ok} group(s) imported and verified,"
-                f" {already} already in the archive{hidden} — safe to format"
+                f" {already} already in the archive{skipped} — safe to format"
             )
     return 1 if report.has_problems else 0
 
