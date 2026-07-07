@@ -15,6 +15,7 @@ extra or missing trailing columns so the format can grow.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import platform
 import re
@@ -39,9 +40,19 @@ class ManifestEntry:
 
 
 def machine_name() -> str:
-    """A filesystem-safe name for this machine."""
+    """A filesystem-safe name for this machine.
+
+    A clean hostname passes through unchanged. When sanitizing had to
+    drop information (foreign characters, excessive length), a short
+    hash of the raw name is appended so that two machines can never
+    silently converge on the same manifest file.
+    """
     raw = platform.node().split(".")[0] or "machine"
-    return re.sub(r"[^A-Za-z0-9_-]", "-", raw)
+    safe = re.sub(r"[^A-Za-z0-9_-]", "-", raw)[:48]
+    if safe != raw:
+        digest = hashlib.md5(raw.encode("utf-8")).hexdigest()[:6]
+        safe = f"{safe.strip('-') or 'machine'}-{digest}"
+    return safe
 
 
 class Manifest:

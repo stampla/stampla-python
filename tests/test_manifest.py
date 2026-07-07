@@ -127,3 +127,41 @@ class TestFormat:
         assert machine_name()
         assert "/" not in machine_name()
         assert " " not in machine_name()
+
+
+class TestMachineName:
+    def name_for(self, monkeypatch: pytest.MonkeyPatch, node: str) -> str:
+        import platform
+
+        monkeypatch.setattr(platform, "node", lambda: node)
+        return machine_name()
+
+    def test_clean_hostname_passes_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self.name_for(monkeypatch, "cider") == "cider"
+        assert self.name_for(monkeypatch, "DESKTOP-AB12CD") == "DESKTOP-AB12CD"
+
+    def test_fqdn_uses_first_label(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self.name_for(monkeypatch, "studio.example.com") == "studio"
+
+    def test_empty_hostname(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self.name_for(monkeypatch, "") == "machine"
+
+    def test_lossy_names_get_disambiguating_hash(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        first = self.name_for(monkeypatch, "ネットワーク")
+        second = self.name_for(monkeypatch, "сервер")
+        assert first != second
+        assert first.startswith("machine-")
+        assert second.startswith("machine-")
+
+    def test_spaces_are_sanitized_with_hash(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        name = self.name_for(monkeypatch, "my host")
+        assert name.startswith("my-host-")
+        assert " " not in name
+
+    def test_long_hostnames_are_bounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        name = self.name_for(monkeypatch, "x" * 300)
+        assert len(name) <= 60
+        assert name != self.name_for(monkeypatch, "x" * 299)
+
+    def test_result_is_deterministic(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self.name_for(monkeypatch, "zażółć") == self.name_for(monkeypatch, "zażółć")
