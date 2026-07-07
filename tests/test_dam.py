@@ -159,6 +159,59 @@ class TestInject:
         (tmp_path / "Photos").mkdir()
         assert main(["inject", "--config", str(tmp_path / "config.toml")]) == 2
 
+    def test_embedded_token_flow_converges(self, archive: Path) -> None:
+        # Writing the token into an embedded-format master changes its
+        # content, so its name can never match its current hash. The flow
+        # must still converge: after the DAM rename, inject goes quiet.
+        month = archive / "Photos" / "2026" / "2026-07"
+        stale = make_drifted_master(month, "2026:07:01 10:00:00")
+
+        code, payload = run_inject(archive, "--apply")
+        assert code == 0
+        token = read_token(stale)
+        assert token is not None
+
+        # simulate the DAM renaming the master to the injected token
+        renamed = stale.with_name(f"{token}.jpg")
+        stale.rename(renamed)
+
+        # inject must now consider this master done — not re-inject,
+        # which would loop forever
+        code, payload = run_inject(archive, "--apply")
+        summary = payload["summary"]
+        assert isinstance(summary, dict)
+        assert code == 0
+        assert findings_of(payload) == []
+        assert summary["ok"] == 1
+        assert read_token(renamed) == token  # unchanged
+
+    def test_embedded_convergence_still_catches_date_changes(self, archive: Path) -> None:
+        month = archive / "Photos" / "2026" / "2026-08"
+        stale = make_drifted_master(month, "2026:08:01 10:00:00")
+        assert run_inject(archive, "--apply")[0] == 0
+        token = read_token(stale)
+        assert token is not None
+        renamed = stale.with_name(f"{token}.jpg")
+        stale.rename(renamed)
+
+        # a capture-time correction changes the date part: convergence
+        # must not mask it
+        subprocess.run(
+            [
+                "exiftool",
+                "-q",
+                "-overwrite_original",
+                "-EXIF:DateTimeOriginal=2026:08:02 11:00:00",
+                str(renamed),
+            ],
+            check=True,
+        )
+        code, payload = run_inject(archive)
+        assert code == 0
+        findings = findings_of(payload)
+        assert findings[0]["bucket"] == "token-pending"
+        assert "20260802_110000_" in str(findings[0]["detail"])
+
     def test_undated_stale_master_is_reported(self, archive: Path) -> None:
         month = archive / "Photos" / "2026" / "2026-06"
         month.mkdir(parents=True)

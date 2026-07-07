@@ -231,3 +231,29 @@ fixed order:
 Renames never overwrite. An existing target is a refusal and a report,
 not a replacement — duplicate content is a finding for a human, not a
 conflict for the tool to resolve.
+
+## The embedded-token circularity
+
+For a master whose metadata lives inside the file (JPEG, DNG, TIFF),
+writing the DAM rename token changes the file's content — so a name
+embedding the content hash can never match the file that carries its own
+name. There is no fixpoint: injecting `date_H₀` produces content with
+hash `H₁`, injecting `date_H₁` produces `H₂`, forever.
+
+stampla resolves this by separating *naming* from *injecting*:
+
+- **Import names files before any DAM sees them.** A scanned TIFF or a
+  JPEG-only archive gets a name matching its exact bytes, untouched.
+  The name stays hash-true until the file is first edited — the normal
+  mutable-format contract.
+- **Derivatives are never injected.** A DNG or TIFF sharing a RAW's
+  prefix is a family member, renamed by the tool with its master.
+- **DAM-managed standalone embedded masters accept one generation of
+  drift.** The injected name reflects the content just before the token
+  write. Once the DAM has renamed the file, name and stored token are
+  equal — that is the *convergence marker*. Inject treats such masters
+  as done rather than chasing its own tail, while a changed capture
+  date still re-triggers (dates are not part of the circularity).
+- **Files not managed by any DAM should be renamed directly** — no
+  token, no modification, an exact hash. The token flow exists only
+  because a DAM must rename its own files.

@@ -97,7 +97,9 @@ def _inject_tree(
         for family in families
         if (master := family.master(master_extensions)) is not None
     ]
-    tags = sorted({entry.partition(":")[2] or entry for entry in chain})
+    assert config.dam is not None
+    token_tag = config.dam.token_tag.partition(":")[2] or config.dam.token_tag
+    tags = sorted({entry.partition(":")[2] or entry for entry in chain} | {token_tag})
     metadata = tool.read_metadata(masters, tags) if masters else {}
     algorithm = config.pattern.digest
     digests: dict[Path, str] = {}
@@ -129,7 +131,18 @@ def _inject_tree(
             report.ok += 1
             continue
 
-        target, note = _token_target(path, master.parsed.ext if master.parsed else "")
+        extension = master.parsed.ext if master.parsed else ""
+        if extension in EMBEDDED_TOKEN_EXTENSIONS and _is_converged(
+            family.prefix, derived, metadata[path], token_tag, config.pattern.datetime_length
+        ):
+            # Writing the token changed the content, so the name can never
+            # equal the current hash for embedded formats. Name == stored
+            # token marks the flow as complete; re-injecting would chase
+            # its own tail forever.
+            report.ok += 1
+            continue
+
+        target, note = _token_target(path, extension)
         if target is None:
             report.add(
                 Finding(
@@ -165,6 +178,26 @@ def _inject_tree(
         report.add(
             Finding(Bucket.TOKEN_WRITTEN, path, f"{derived} written into {target.name}{note}")
         )
+
+
+def _is_converged(
+    prefix: str,
+    derived: str,
+    tags: dict[str, object],
+    token_tag: str,
+    datetime_length: int,
+) -> bool:
+    """Whether an embedded-format master already completed the token flow.
+
+    True when the stored token equals the current name prefix (the DAM
+    renamed to what was injected) and the capture date still agrees —
+    the remaining hash difference is the token write itself.
+    """
+    stored = next(
+        (value for key, value in tags.items() if key.endswith(f":{token_tag}")),
+        None,
+    )
+    return stored == prefix and derived[:datetime_length] == prefix[:datetime_length]
 
 
 def _token_target(master: Path, extension: str) -> tuple[Path | None, str]:
