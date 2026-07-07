@@ -25,6 +25,7 @@ from stampla.dates import UnresolvedDate, resolve_date
 from stampla.exiftool import ExifTool
 from stampla.family import Family, group_by_prefix
 from stampla.hashing import hash_files
+from stampla.manifest import Manifest
 from stampla.pattern import NamingPattern
 from stampla.report import Bucket, Finding, Report
 from stampla.scan import FileStatus, ScannedFile, scan_tree
@@ -34,6 +35,8 @@ from stampla.scan import FileStatus, ScannedFile, scan_tree
 class VerifyOptions:
     skip_hash: bool = False
     workers: int | None = None
+    full: bool = False
+    use_manifest: bool = True
 
 
 def run_verify(
@@ -44,10 +47,15 @@ def run_verify(
 ) -> Report:
     """Verify the configured trees (or the given subpaths) under ``root``."""
     options = options or VerifyOptions()
+    manifest = None
+    if options.use_manifest and not options.skip_hash:
+        manifest = Manifest.load(root.resolve())
     report = Report()
     with ExifTool() as tool:
         for tree, scan_root in _targets(config, root, paths):
-            report.merge(_verify_tree(tool, tree, scan_root, config, options))
+            report.merge(_verify_tree(tool, tree, scan_root, config, options, manifest))
+    if manifest is not None:
+        manifest.save()
     return report
 
 
@@ -72,7 +80,12 @@ def _targets(config: Config, root: Path, paths: Sequence[Path]) -> list[tuple[Tr
 
 
 def _verify_tree(
-    tool: ExifTool, tree: Tree, scan_root: Path, config: Config, options: VerifyOptions
+    tool: ExifTool,
+    tree: Tree,
+    scan_root: Path,
+    config: Config,
+    options: VerifyOptions,
+    manifest: Manifest | None = None,
 ) -> Report:
     report = Report()
     files = list(scan_tree(scan_root, config.grammar, config.excludes))
@@ -104,10 +117,20 @@ def _verify_tree(
     digests: dict[Path, str] = {}
     hash_errors: dict[Path, str] = {}
     if not options.skip_hash and candidates:
-        raw_digests, hash_errors = hash_files(
-            candidates, [config.pattern.digest], workers=options.workers
-        )
-        digests = {path: result[config.pattern.digest] for path, result in raw_digests.items()}
+        algorithm = config.pattern.digest
+        to_hash = candidates
+        if manifest is not None and not options.full:
+            for path in candidates:
+                cached = manifest.lookup(path, algorithm)
+                if cached is not None:
+                    digests[path] = cached
+            to_hash = [path for path in candidates if path not in digests]
+        if to_hash:
+            raw_digests, hash_errors = hash_files(to_hash, [algorithm], workers=options.workers)
+            for path, result in raw_digests.items():
+                digests[path] = result[algorithm]
+                if manifest is not None:
+                    manifest.record(path, algorithm, result[algorithm])
 
     derived_owners: dict[str, list[Path]] = defaultdict(list)
     for family in families:

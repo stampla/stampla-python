@@ -49,6 +49,15 @@ files, orphaned sidecars and masters that exist in several formats.
 between full runs. `--json` emits the report machine-readably; the exit
 code is `0` when clean, `1` with findings, `2` on errors.
 
+Hashes are cached in a per-machine manifest
+(`.stampla/manifest-<machine>.tsv` under the archive root), so repeat
+runs only hash new and touched files. A cached digest is trusted only
+while the file's size and mtime are unchanged; `--full` re-hashes
+everything regardless — run it periodically, since silent corruption that
+preserves size and mtime is exactly what the cache cannot see.
+`--no-manifest` disables the cache entirely. If you sync the archive
+between machines, exclude `.stampla/` from the sync.
+
 ## Status
 
 Early development. Planned next:

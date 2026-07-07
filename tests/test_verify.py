@@ -182,6 +182,45 @@ class TestVerifyEndToEnd:
         assert code == 0, payload
         assert summary["ok"] == 1
 
+    def test_manifest_is_created_and_reused(self, archive: Path) -> None:
+        month = archive / "Photos" / "2026" / "2026-06"
+        master = make_master(month, "2026:06:01 10:00:00")
+        assert run_cli(archive)[0] == 0
+        manifests = list((archive / ".stampla").glob("manifest-*.tsv"))
+        assert len(manifests) == 1
+        assert master.name in manifests[0].read_text()
+
+        # Doctor the content while faking the original size and mtime: the
+        # manifest cannot see this (documented trust boundary), --full can.
+        stat = master.stat()
+        payload = bytearray(master.read_bytes())
+        payload[-1] ^= 0xFF
+        master.write_bytes(payload)
+        import os
+
+        os.utime(master, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        assert run_cli(archive)[0] == 0  # cached digest still trusted
+        code, payload_json = run_cli(archive, "--full")
+        assert code == 1
+        assert buckets_of(payload_json)[master.name] == "corruption"
+
+    def test_touched_file_is_rehashed(self, archive: Path) -> None:
+        month = archive / "Photos" / "2026" / "2026-07"
+        master = make_master(month, "2026:07:01 10:00:00")
+        assert run_cli(archive)[0] == 0
+        content = bytearray(master.read_bytes())
+        content[-1] ^= 0xFF
+        master.write_bytes(content)  # mtime changes naturally
+        code, payload = run_cli(archive)
+        assert code == 1
+        assert buckets_of(payload)[master.name] == "corruption"
+
+    def test_no_manifest_flag(self, archive: Path) -> None:
+        month = archive / "Photos" / "2026" / "2026-08"
+        make_master(month, "2026:08:01 10:00:00")
+        assert run_cli(archive, "--no-manifest")[0] == 0
+        assert not (archive / ".stampla").exists()
+
     def test_nothing_to_verify_is_an_error(self, archive: Path) -> None:
         code = main(["verify", "--config", str(archive / "config.toml")])
         assert code == 2

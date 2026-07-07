@@ -38,6 +38,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="check capture times only; much faster, but misses content changes",
     )
+    verify.add_argument(
+        "--full",
+        action="store_true",
+        help="re-hash everything, ignoring the manifest cache",
+    )
+    verify.add_argument(
+        "--no-manifest",
+        action="store_true",
+        help="neither read nor update the per-machine manifest",
+    )
     verify.add_argument("--workers", type=int, help="parallel hashing processes")
     return parser
 
@@ -60,7 +70,12 @@ def _run_verify_command(args: argparse.Namespace) -> int:
     root = args.root or (Path(config.root) if config.root else None)
     if root is None:
         raise ConfigError("no archive root: set 'root' in the config or pass --root")
-    options = VerifyOptions(skip_hash=args.skip_hash, workers=args.workers)
+    options = VerifyOptions(
+        skip_hash=args.skip_hash,
+        workers=args.workers,
+        full=args.full,
+        use_manifest=not args.no_manifest,
+    )
     report = run_verify(config, root, args.paths, options)
     print(report.to_json() if args.json else report.render_text())
     return 1 if report.has_findings else 0

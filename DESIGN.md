@@ -180,3 +180,29 @@ derivatives inherit the master's prefix by definition, so their names are
 right exactly when their master's is. Ambiguous families (a RAW plus a
 conversion carrying the same prefix) are settled by evidence: the
 candidate whose content hash matches the prefix is the master.
+
+## The hash manifest
+
+Hashing a large archive is minutes of work; doing it on every verify run
+would discourage running verify at all. The manifest caches digests
+per machine — `.stampla/manifest-<machine>.tsv` under the archive
+root — keyed by relative path and vouched for by size and mtime. Any
+mtime or size change invalidates the entry; there is no clock heuristic
+and no grace window.
+
+Design choices, deliberately boring:
+
+- **One file per machine.** Machines that sync an archive never write to
+  each other's manifest, so sync conflicts are structurally impossible.
+  The directory should still be excluded from sync: each machine's
+  "when did I last verify this here" is meaningful only locally.
+- **TSV without quoting.** Tabs and newlines are rejected in paths rather
+  than escaped — they do not occur in real archives, and a format without
+  an escaping layer can be processed with `cut` and `awk` safely.
+- **Growable rows.** Readers ignore extra columns and skip short or
+  unparsable rows, so columns can be appended without a migration; the
+  worst case is a re-hash.
+- **Honest trust boundary.** The cache cannot detect corruption that
+  preserves both size and mtime. `--full` bypasses it entirely and should
+  be run periodically; the manifest makes the *routine* case fast, it
+  does not replace the deep check.
