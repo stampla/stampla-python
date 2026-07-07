@@ -10,6 +10,7 @@ from pathlib import Path
 from stampla import __version__
 from stampla.apply import undo_journal
 from stampla.config import Config, ConfigError, load_config
+from stampla.dam import InjectOptions, run_inject
 from stampla.exiftool import ExifToolError
 from stampla.importer import apply_import, build_plan
 from stampla.journal import Journal, list_journals
@@ -70,6 +71,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     import_cmd.add_argument("--workers", type=int, help="parallel hashing processes")
 
+    inject = subparsers.add_parser(
+        "inject",
+        help="write computed names into the DAM's rename token for stale-named masters",
+    )
+    inject.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        help="limit injection to these paths (default: all DAM-managed trees)",
+    )
+    inject.add_argument("--config", type=Path, help="TOML configuration file")
+    inject.add_argument("--root", type=Path, help="archive root (overrides the config)")
+    inject.add_argument("--json", action="store_true", help="machine-readable output")
+    inject.add_argument(
+        "--apply",
+        action="store_true",
+        help="actually write tokens; without this flag intended writes are only shown",
+    )
+    inject.add_argument("--workers", type=int, help="parallel hashing processes")
+
     undo = subparsers.add_parser(
         "undo",
         help="revert a journaled apply run (most recent by default)",
@@ -90,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_undo_command(args)
         if args.command == "import":
             return _run_import_command(args)
+        if args.command == "inject":
+            return _run_inject_command(args)
         return _run_verify_command(args)
     except (ConfigError, ExifToolError, ValueError, OSError) as error:
         print(f"stampla: {error}", file=sys.stderr)
@@ -150,6 +173,25 @@ def _run_import_command(args: argparse.Namespace) -> int:
             print(
                 f"\ncard fully accounted for: {report.ok} group(s) imported and verified,"
                 f" {already} already in the archive{skipped} — safe to format"
+            )
+    return 1 if report.has_problems else 0
+
+
+def _run_inject_command(args: argparse.Namespace) -> int:
+    config, root = _config_and_root(args)
+    options = InjectOptions(apply=args.apply, workers=args.workers)
+    report = run_inject(config, root.resolve(), tuple(args.paths), options)
+    print(report.to_json() if args.json else report.render_text())
+    if not args.json:
+        written = sum(1 for f in report.findings if f.bucket is Bucket.TOKEN_WRITTEN)
+        pending = sum(1 for f in report.findings if f.bucket is Bucket.TOKEN_PENDING)
+        if pending:
+            print(f"\ndry run: {pending} token(s) would be written; pass --apply to write")
+        if written:
+            print(
+                f"\n{written} token(s) written. In the DAM: Read Metadata from Files"
+                " on the affected folders, then rename with the token template"
+                " (Lightroom Classic: the {Job Identifier} filename token)."
             )
     return 1 if report.has_problems else 0
 

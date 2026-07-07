@@ -27,11 +27,16 @@ class Bucket(Enum):
     HASH_ERROR = "hash-error"
     ALREADY_IMPORTED = "already-imported"
     IGNORED = "ignored"
+    TOKEN_PENDING = "token-pending"
+    TOKEN_WRITTEN = "token-written"
+    NEEDS_SIDECAR = "needs-sidecar"
 
 
 #: Findings that describe a safe, fully accounted-for state rather than a
-#: problem. They never fail an import's exit code.
-SAFE_BUCKETS = frozenset({Bucket.ALREADY_IMPORTED, Bucket.IGNORED})
+#: problem. They never fail a command's exit code.
+SAFE_BUCKETS = frozenset(
+    {Bucket.ALREADY_IMPORTED, Bucket.IGNORED, Bucket.TOKEN_PENDING, Bucket.TOKEN_WRITTEN}
+)
 
 
 #: Rendering order: alarms first, expected drift and inventory last.
@@ -44,9 +49,12 @@ _BUCKET_ORDER = (
     Bucket.COLLISION,
     Bucket.AMBIGUOUS_MASTER,
     Bucket.ORPHAN_FAMILY,
+    Bucket.NEEDS_SIDECAR,
     Bucket.MALFORMED,
     Bucket.EDIT_DRIFT,
     Bucket.UNNAMED,
+    Bucket.TOKEN_PENDING,
+    Bucket.TOKEN_WRITTEN,
     Bucket.ALREADY_IMPORTED,
     Bucket.IGNORED,
 )

@@ -87,16 +87,36 @@ preserves size and mtime is exactly what the cache cannot see.
 `--no-manifest` disables the cache entirely. If you sync the archive
 between machines, exclude `.stampla/` from the sync.
 
+### inject
+
+A DAM (e.g. Adobe Lightroom Classic) must rename the masters it manages
+itself, or its catalog loses track of them — but it cannot compute
+content hashes. `stampla inject` bridges the two: it finds masters
+whose names have gone stale, writes each one's freshly computed name
+into a metadata field the DAM exposes as a filename template token, and
+the DAM does the renaming.
+
+```console
+$ stampla inject --config archive.toml --apply
+...
+3 token(s) written. In the DAM: Read Metadata from Files on the affected
+folders, then rename with the token template (Lightroom Classic: the
+{Job Identifier} filename token).
+```
+
+The token lands in the master's `.xmp` sidecar for RAW files, or inside
+the file itself for embedded-metadata formats (JPEG, DNG, TIFF). A RAW
+without a sidecar is reported as `needs-sidecar` — stampla never
+fabricates sidecars, because a DAM reading a minimal script-made file
+could wipe catalog-side metadata. Save metadata from the DAM first,
+then rerun.
+
 ## Status
 
 Early development. Planned next:
 
-- `import` — pull files off a memory card into a date-organized archive,
-  named on arrival
 - `organize` — audit a messy directory tree and produce a triage report,
   without touching anything
-- integration with DAM tools (e.g. Adobe Lightroom Classic) so managed
-  masters are renamed by the DAM itself via a metadata token
 
 Safety first: every command is a dry run unless explicitly applied, and a
 file whose capture time cannot be resolved is reported, never renamed.
