@@ -66,9 +66,10 @@ class TestValidation:
         with pytest.raises(ConfigError, match="media"):
             config_from_dict({"trees": [{"path": "Photos", "media": "audio"}]})
 
-    def test_absolute_tree_path(self) -> None:
+    @pytest.mark.parametrize("path", ["/Photos", "\\Photos", "C:/Photos", "C:\\Photos", "C:Photos"])
+    def test_non_relative_tree_path(self, path: str) -> None:
         with pytest.raises(ConfigError, match="relative"):
-            config_from_dict({"trees": [{"path": "/Photos", "media": "photo"}]})
+            config_from_dict({"trees": [{"path": path, "media": "photo"}]})
 
     def test_duplicate_tree_paths(self) -> None:
         with pytest.raises(ConfigError, match="unique"):

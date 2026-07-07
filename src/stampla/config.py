@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import tomllib
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -74,7 +74,9 @@ class Tree:
     layout: str = "{yyyy}/{yyyy}-{mm}"
 
     def __post_init__(self) -> None:
-        if not self.path or Path(self.path).is_absolute():
+        # Windows path semantics catch "/x", "\\x", "C:\\x" and "C:x" on
+        # every platform; Path.is_absolute() would miss "/x" on Windows.
+        if not self.path or PureWindowsPath(self.path).anchor:
             raise ConfigError(f"tree path must be relative to the archive root: {self.path!r}")
         if self.media not in ("photo", "video"):
             raise ConfigError(f"tree media must be 'photo' or 'video': {self.media!r}")
