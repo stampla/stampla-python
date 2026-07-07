@@ -72,7 +72,7 @@ def validate_plan(
             targets.add(rename.new)
             if not rename.old.is_file():
                 problems.append(f"{move.key}: source missing: {rename.old}")
-            if rename.new.exists():
+            if rename.new.exists() and not _is_case_only_rename(rename.old, rename.new):
                 problems.append(f"{move.key}: target already exists: {rename.new}")
     overlap = sources & targets
     for path in sorted(overlap):
@@ -171,9 +171,19 @@ def _delete_copies(move: FamilyMove) -> str | None:
     return None
 
 
+def _is_case_only_rename(old: Path, new: Path) -> bool:
+    """On case-insensitive filesystems, .FP2 -> .fp2 'exists' as itself."""
+    if old.name.lower() != new.name.lower() or old.parent != new.parent:
+        return False
+    try:
+        return old.exists() and new.exists() and old.samefile(new)
+    except OSError:
+        return False
+
+
 def _no_clobber_rename(old: Path, new: Path) -> None:
     """Rename without ever overwriting an existing file."""
-    if new.exists():
+    if new.exists() and not _is_case_only_rename(old, new):
         raise FileExistsError(f"target already exists: {new}")
     new.parent.mkdir(parents=True, exist_ok=True)
     os.rename(old, new)

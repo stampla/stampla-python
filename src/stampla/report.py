@@ -31,12 +31,21 @@ class Bucket(Enum):
     TOKEN_WRITTEN = "token-written"
     NEEDS_SIDECAR = "needs-sidecar"
     OTHER_PATTERN = "other-pattern"
+    RENAME_PENDING = "rename-pending"
+    RENAMED = "renamed"
 
 
 #: Findings that describe a safe, fully accounted-for state rather than a
 #: problem. They never fail a command's exit code.
 SAFE_BUCKETS = frozenset(
-    {Bucket.ALREADY_IMPORTED, Bucket.IGNORED, Bucket.TOKEN_PENDING, Bucket.TOKEN_WRITTEN}
+    {
+        Bucket.ALREADY_IMPORTED,
+        Bucket.IGNORED,
+        Bucket.TOKEN_PENDING,
+        Bucket.TOKEN_WRITTEN,
+        Bucket.RENAME_PENDING,
+        Bucket.RENAMED,
+    }
 )
 
 
@@ -57,6 +66,8 @@ _BUCKET_ORDER = (
     Bucket.UNNAMED,
     Bucket.TOKEN_PENDING,
     Bucket.TOKEN_WRITTEN,
+    Bucket.RENAME_PENDING,
+    Bucket.RENAMED,
     Bucket.ALREADY_IMPORTED,
     Bucket.IGNORED,
 )

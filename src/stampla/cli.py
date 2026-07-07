@@ -14,6 +14,7 @@ from stampla.dam import InjectOptions, run_inject
 from stampla.exiftool import ExifToolError
 from stampla.importer import apply_import, build_plan
 from stampla.journal import Journal, list_journals
+from stampla.renamer import RenameOptions, run_rename
 from stampla.report import Bucket
 from stampla.verify import VerifyOptions, run_verify
 
@@ -91,6 +92,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     inject.add_argument("--workers", type=int, help="parallel hashing processes")
 
+    rename = subparsers.add_parser(
+        "rename",
+        help="rename files whose derived name differs, through the journaled engine",
+    )
+    rename.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        help="limit renaming to these paths (default: all configured trees)",
+    )
+    rename.add_argument("--config", type=Path, help="TOML configuration file")
+    rename.add_argument("--root", type=Path, help="archive root (overrides the config)")
+    rename.add_argument("--json", action="store_true", help="machine-readable output")
+    rename.add_argument(
+        "--apply",
+        action="store_true",
+        help="actually rename; without this flag the plan is only shown",
+    )
+    rename.add_argument("--workers", type=int, help="parallel hashing processes")
+
     undo = subparsers.add_parser(
         "undo",
         help="revert a journaled apply run (most recent by default)",
@@ -113,6 +134,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_import_command(args)
         if args.command == "inject":
             return _run_inject_command(args)
+        if args.command == "rename":
+            return _run_rename_command(args)
         return _run_verify_command(args)
     except (ConfigError, ExifToolError, ValueError, OSError) as error:
         print(f"stampla: {error}", file=sys.stderr)
@@ -174,6 +197,17 @@ def _run_import_command(args: argparse.Namespace) -> int:
                 f"\ncard fully accounted for: {report.ok} group(s) imported and verified,"
                 f" {already} already in the archive{skipped} — safe to format"
             )
+    return 1 if report.has_problems else 0
+
+
+def _run_rename_command(args: argparse.Namespace) -> int:
+    config, root = _config_and_root(args)
+    options = RenameOptions(apply=args.apply, workers=args.workers)
+    report, moves = run_rename(config, root.resolve(), tuple(args.paths), options)
+    print(report.to_json() if args.json else report.render_text())
+    if not args.json and not args.apply and moves:
+        total = sum(len(m.renames) for m in moves)
+        print(f"\ndry run: {total} rename(s) planned; pass --apply to execute")
     return 1 if report.has_problems else 0
 
 
