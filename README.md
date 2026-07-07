@@ -1,5 +1,7 @@
 # stampla
 
+[![CI](https://github.com/stampla/stampla/actions/workflows/ci.yml/badge.svg)](https://github.com/stampla/stampla/actions/workflows/ci.yml)
+
 Deterministic, verifiable naming for photo and video archives.
 
 stampla names every file in an archive after what it is and when it
