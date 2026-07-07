@@ -126,13 +126,13 @@ class TestIntegration:
         tool.execute("-o", str(target), "-XMP-dc:Title=hello")
         assert target.exists()
         result = tool.read_metadata([target], ["XMP-dc:Title"])
-        assert result[target]["XMP-dc:Title"] == "hello"
+        assert result[target]["XMP:Title"] == "hello"
 
     def test_non_ascii_filename(self, tool: ExifTool, tmp_path: Path) -> None:
         target = tmp_path / "zdjęcia ąśź.xmp"
         tool.execute("-o", str(target), "-XMP-dc:Title=łąka")
         result = tool.read_metadata([target], ["XMP-dc:Title"])
-        assert result[target]["XMP-dc:Title"] == "łąka"
+        assert result[target]["XMP:Title"] == "łąka"
 
     def test_unreadable_file_is_absent_from_results(self, tool: ExifTool, tmp_path: Path) -> None:
         missing = tmp_path / "not-there.nef"
@@ -145,10 +145,16 @@ class TestIntegration:
             tool.execute("-o", str(target), f"-XMP-dc:Title=t{index}")
             paths.append(target)
         result = tool.read_metadata(paths, ["XMP-dc:Title"])
-        assert [result[p]["XMP-dc:Title"] for p in paths] == ["t0", "t1", "t2"]
+        assert [result[p]["XMP:Title"] for p in paths] == ["t0", "t1", "t2"]
 
     def test_group_qualified_keys(self, tool: ExifTool, tmp_path: Path) -> None:
         target = tmp_path / "grouped.xmp"
         tool.execute("-o", str(target), "-XMP-photoshop:TransmissionReference=abc")
         result = tool.read_metadata([target], ["TransmissionReference"])
+        assert result[target] == {"XMP:TransmissionReference": "abc"}
+
+    def test_group_level_is_selectable(self, tool: ExifTool, tmp_path: Path) -> None:
+        target = tmp_path / "leveled.xmp"
+        tool.execute("-o", str(target), "-XMP-photoshop:TransmissionReference=abc")
+        result = tool.read_metadata([target], ["TransmissionReference"], group_level=1)
         assert result[target] == {"XMP-photoshop:TransmissionReference": "abc"}

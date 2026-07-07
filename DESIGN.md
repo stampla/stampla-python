@@ -95,10 +95,36 @@ formats that matter most (current RAW variants, video containers) are
 exactly where such libraries silently return nothing, and a silently
 missing date is the failure mode stampla exists to prevent.
 
-Queries always use `-a -G1`, because the same tag name routinely appears
-several times in one file with different meanings. A video may carry a
-maker-notes `CreateDate` in local wall-clock time *and* a QuickTime
-`CreateDate` in UTC; without group qualification, which one is returned is
-an accident of tag priority. Downstream logic therefore always sees
-group-qualified tags (`Nikon:CreateDate`, `QuickTime:CreateDate`) and can
-rank them deliberately.
+Queries always use `-a` with group-qualified names, because the same tag
+name routinely appears several times in one file with different meanings.
+A video may carry a maker-notes `CreateDate` in local wall-clock time
+*and* a QuickTime `CreateDate` in UTC; without group qualification, which
+one is returned is an accident of tag priority. Downstream logic therefore
+always sees group-qualified tags (`MakerNotes:CreateDate`,
+`QuickTime:CreateDate`) and can rank them deliberately.
+
+## Resolving capture time
+
+Capture time is resolved by an ordered chain of tag names per media kind;
+the first entry yielding a complete timestamp wins. The defaults:
+
+```
+photo:  EXIF:DateTimeOriginal → EXIF:CreateDate → XMP:DateCreated
+video:  DateTimeOriginal → CreateDate → QuickTime:CreateDate
+```
+
+An unqualified entry matches the tag in any group *except* groups the
+chain names explicitly for that same tag. That one rule encodes the
+QuickTime problem: most cameras write their trustworthy local wall-clock
+time into maker notes and a UTC copy into the QuickTime atoms, while some
+formats (BRAW) have *only* a QuickTime timestamp — which is local. So
+`CreateDate` prefers any maker-notes value, and `QuickTime:CreateDate`
+serves as the explicit last resort for files that offer nothing else.
+
+Resolved values are naive local wall-clock time — what a person at the
+scene would have read off a watch. Timestamps that are incomplete, zeroed
+or implausible never resolve; a file without a resolvable capture time is
+reported and skipped, because a wrong-but-plausible name is worse than no
+rename. For sources known to store only UTC (typically phone videos), a
+DST-aware conversion into a configured timezone is available and its use
+is always flagged in reports.

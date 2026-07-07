@@ -2,10 +2,10 @@
 
 ExifTool is run as a single persistent process (``-stay_open``) so that
 querying thousands of files does not pay its startup cost per file.
-Metadata is always requested with ``-a -G1``: several tags with the same
-name routinely coexist in one file (a maker-notes capture time in local
-wall-clock next to a QuickTime one in UTC), and only the group name tells
-them apart.
+Metadata is always requested with ``-a`` and group-qualified tag names:
+several tags with the same name routinely coexist in one file (a
+maker-notes capture time in local wall-clock next to a QuickTime one in
+UTC), and only the group name tells them apart.
 """
 
 from __future__ import annotations
@@ -134,8 +134,13 @@ class ExifTool:
         paths: Sequence[Path],
         tags: Iterable[str],
         extra_args: Sequence[str] = (),
+        group_level: int = 0,
     ) -> dict[Path, dict[str, Any]]:
         """Read the given tags from many files, keyed by group-qualified name.
+
+        Group family 0 gives the coarse groups date resolution ranks by
+        (``EXIF``, ``XMP``, ``MakerNotes``, ``QuickTime``); pass a different
+        level for finer group names.
 
         Files ExifTool cannot read are simply absent from the result; the
         caller decides whether that is an error.
@@ -147,7 +152,7 @@ class ExifTool:
             chunk = paths[start : start + _QUERY_CHUNK_SIZE]
             entries = self.execute_json(
                 "-a",
-                "-G1",
+                f"-G{group_level}",
                 *charset_args,
                 *extra_args,
                 *tag_args,
