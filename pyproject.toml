@@ -1,0 +1,78 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stampla"
+description = "Deterministic, verifiable naming for photo and video archives"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Jakub Stefanski", email = "js@jakubstefanski.com" }]
+requires-python = ">=3.11"
+dynamic = ["version"]
+keywords = ["photography", "video", "exif", "rename", "archive", "checksum", "raw", "sidecar"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: System :: Archiving",
+]
+
+[project.urls]
+Homepage = "https://github.com/stampla/stampla"
+Issues = "https://github.com/stampla/stampla/issues"
+
+[project.scripts]
+stampla = "stampla.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[tool.hatch.version]
+path = "src/stampla/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stampla"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "C4",  # comprehensions
+    "SIM", # simplify
+    "PT",  # pytest style
+    "RUF", # ruff-specific
+]
+
+[tool.mypy]
+strict = true
+files = ["src/stampla", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+
+[tool.coverage.run]
+source = ["stampla"]
+omit = ["*/__main__.py"]
