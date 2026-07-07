@@ -128,3 +128,31 @@ reported and skipped, because a wrong-but-plausible name is worse than no
 rename. For sources known to store only UTC (typically phone videos), a
 DST-aware conversion into a configured timezone is available and its use
 is always flagged in reports.
+
+## Families
+
+All files sharing one name prefix form a family and are renamed as one
+unit. Because the prefix embeds a content hash, it is unique per master
+across the whole archive — so sidecars kept in subdirectories
+(`NKSC_PARAM/<master>.nksc`) join their master's family with no directory
+logic at all.
+
+Within a family, the *master* is the unique member shaped `prefix.ext`
+with a master extension (RAW formats for photo trees, video containers
+for video trees). Some families legitimately have none (an orphan sidecar
+whose master was deleted) or several candidates (a RAW plus a DNG
+conversion deliberately named after it). Both are reported rather than
+guessed at structurally; when hashes are available, the true master is
+the candidate whose content matches the prefix, and same-prefix
+conversions behave like derivatives — they inherit the name and are
+re-prefixed with the family.
+
+Files that are not yet named (a memory card during import) group by
+directory and original base name instead: `DSC1234.NEF`, `DSC1234.xmp`
+and `DSC1234.NEF.xmp` share the base `DSC1234`, and sidecar-directory
+rules map `NKSC_PARAM/DSC1234.NEF.nksc` to the master's directory first.
+A base extending another base with a `-`/`_` label (`DSC1234-Edit`)
+merges into the shorter group only when the shorter group has a
+camera-native master and the labeled group does not — editor output like
+`DSC1234-Edit.tif` travels with its RAW, while `IMG_01.NEF` is never
+mistaken for a derivative of `IMG.NEF`.
