@@ -57,10 +57,10 @@ class TestOrganize:
         make_card_photo(messy, "IMG_0001", "2019:05:04 10:00:00")
         code, payload = run_organize(archive, messy)
         assert code == 0
-        proposals = payload["proposals"]
+        proposals = payload["plan"]
         assert isinstance(proposals, list)
         assert len(proposals) == 1
-        target = Path(str(proposals[0]["files"][0][1]))
+        target = Path(str(proposals[0]["changes"][0][1]))
         assert target.parts[-4:-1] == ("Photos", "2019", "2019-05")
         assert not (archive / "Photos").exists()  # nothing moved
 
@@ -76,7 +76,7 @@ class TestOrganize:
         assert code == 1  # mtime dating needs human confirmation
         findings = findings_of(payload)
         assert findings[0]["bucket"] == "mtime-dated"
-        proposals = payload["proposals"]
+        proposals = payload["plan"]
         assert isinstance(proposals, list)
         assert len(proposals) == 1  # still proposed, not dropped
 

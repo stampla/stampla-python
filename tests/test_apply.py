@@ -302,6 +302,21 @@ class TestSafetyGuarantees:
             Journal.create(root, moves, directory=journal_dir)
 
 
+class TestContainment:
+    def test_apply_rechecks_target_containment(self, root: Path, journal_dir: Path) -> None:
+        from stampla.apply import _containment_error
+        from stampla.journal import FamilyMove as FM
+
+        make_file(root, "a.nef")
+        escaping = FM(
+            key="a",
+            renames=(Rename(old=root / "a.nef", new=root.parent / "outside.nef"),),
+        )
+        error = _containment_error(escaping, root)
+        assert error is not None
+        assert "escapes the root" in error
+
+
 class TestUndo:
     def test_round_trip(self, root: Path, journal_dir: Path) -> None:
         make_file(root, "a.nef")

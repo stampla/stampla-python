@@ -32,13 +32,6 @@ from stampla.journal import FamilyMove, Journal, Rename
 from stampla.report import Bucket, Finding, Report
 
 
-@dataclass(frozen=True)
-class ImportOptions:
-    apply: bool = False
-    workers: int | None = None
-    journal_dir: Path | None = None
-
-
 @dataclass
 class ImportPlan:
     algorithm: str
@@ -263,11 +256,12 @@ def _master_of(
             if member.suffix.lstrip(".").lower() in config.raw_extensions
         ]
         return raws[0] if len(raws) == 1 else None
-    # a lone edited photo (e.g. only a jpg) is its own master
+    # a lone photo without a camera-native RAW (a standalone DNG or a
+    # JPEG-only shot) is its own master
     loose = [
         member
         for member in group.members
-        if base_named(member) and member.suffix.lstrip(".").lower() in {"jpg", "jpeg"}
+        if base_named(member) and member.suffix.lstrip(".").lower() in {"jpg", "jpeg", "dng"}
     ]
     return loose[0] if len(loose) == 1 else None
 

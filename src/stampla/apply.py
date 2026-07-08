@@ -137,7 +137,9 @@ def apply_plan(journal: Journal) -> ApplyResult:
                 else:
                     result.failed.append((move.key, error))
                 continue
-            error = _copy_family(move) if is_copy else _apply_family(move)
+            error = _containment_error(move, journal.root)
+            if error is None:
+                error = _copy_family(move) if is_copy else _apply_family(move)
             if error is None:
                 error = _record_done(journal, move.key)
             if error is None:
@@ -177,6 +179,19 @@ def undo_journal(journal: Journal) -> ApplyResult:
             else:
                 result.failed.append((move.key, error))
     return result
+
+
+def _containment_error(move: FamilyMove, root: Path) -> str | None:
+    """Re-check at apply time that no target escapes the root.
+
+    Plan-time validation resolved these paths once; a directory swapped
+    for a symlink since then must not let a rename land outside.
+    """
+    resolved_root = root.resolve()
+    for rename in move.renames:
+        if not rename.new.resolve().is_relative_to(resolved_root):
+            return f"target escapes the root at apply time: {rename.new}"
+    return None
 
 
 def _record_done(journal: Journal, key: str) -> str | None:

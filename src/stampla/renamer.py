@@ -45,12 +45,6 @@ class RenameOptions:
     use_manifest: bool = True
 
 
-@dataclass
-class RenamePlan:
-    moves: tuple[FamilyMove, ...] = ()
-    report: Report | None = None
-
-
 def run_rename(
     config: Config, root: Path, paths: tuple[Path, ...] = (), options: RenameOptions | None = None
 ) -> tuple[Report, tuple[FamilyMove, ...]]:
@@ -65,6 +59,9 @@ def run_rename(
             scan_root = (root / tree.path).resolve()
             if paths:
                 scoped = [p.resolve() for p in paths if p.resolve().is_relative_to(scan_root)]
+                for candidate in scoped:
+                    if not candidate.is_dir():
+                        raise ValueError(f"expected a directory, got: {candidate}")
                 matched.update(scoped)
             else:
                 scoped = [scan_root] if scan_root.is_dir() else []

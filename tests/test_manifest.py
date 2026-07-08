@@ -116,6 +116,29 @@ class TestFormat:
         )
         assert len(Manifest.load(root)) == 0
 
+    def test_out_of_root_path_is_a_manifest_error(self, root: Path) -> None:
+        narrow_root = root / "Photos"
+        outside = root / "elsewhere.nef"
+        outside.write_bytes(b"x")
+        manifest = Manifest.load(narrow_root)
+        with pytest.raises(ManifestError, match="outside"):
+            manifest.lookup(outside, "md5")
+
+    def test_old_trusted_entries_are_counted_stale(self, root: Path) -> None:
+        path = make_file(root, "a.nef")
+        manifest = Manifest.load(root)
+        manifest.record(path, "md5", "abc123")
+        manifest.save()
+        aged = manifest.path.read_text().replace(
+            manifest.path.read_text().splitlines()[1].split("\t")[5],
+            "2020-01-01T00:00:00Z",
+        )
+        manifest.path.write_text(aged)
+
+        reloaded = Manifest.load(root)
+        assert reloaded.lookup(path, "md5") == "abc123"  # still trusted
+        assert reloaded.stale_trusted == 1  # but counted
+
     def test_tab_in_path_is_rejected(self, root: Path) -> None:
         # No file is created: Windows cannot even represent this name,
         # and rejection must not depend on the file existing.

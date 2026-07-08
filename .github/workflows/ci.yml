@@ -60,4 +60,4 @@ jobs:
       - name: Install package
         run: python -m pip install -e ".[dev]"
       - name: Run tests
-        run: pytest --cov=stampla --cov-report=term-missing --cov-fail-under=85
+        run: pytest --cov=stampla --cov-report=term-missing --cov-fail-under=90

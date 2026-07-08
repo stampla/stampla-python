@@ -55,6 +55,11 @@ def machine_name() -> str:
     return safe
 
 
+#: cached digests older than this are still trusted, but counted so
+#: commands can suggest a --full pass
+STALE_AFTER_DAYS = 180
+
+
 class Manifest:
     """Digest cache for one archive root on one machine."""
 
@@ -63,6 +68,8 @@ class Manifest:
         self.path = root / directory / f"manifest-{machine_name()}.tsv"
         self._entries: dict[str, ManifestEntry] = {}
         self._dirty = False
+        #: lookups served this session from entries older than the bound
+        self.stale_trusted = 0
 
     def __len__(self) -> int:
         return len(self._entries)
@@ -104,6 +111,8 @@ class Manifest:
             return None
         if stat.st_size != entry.size or stat.st_mtime_ns != entry.mtime_ns:
             return None
+        if self._is_stale(entry.checked_at):
+            self.stale_trusted += 1
         return entry.digest
 
     def record(self, path: Path, algorithm: str, digest: str) -> None:
@@ -136,8 +145,21 @@ class Manifest:
         os.replace(scratch, self.path)
         self._dirty = False
 
+    @staticmethod
+    def _is_stale(checked_at: str) -> bool:
+        if not checked_at:
+            return True
+        try:
+            checked = datetime.strptime(checked_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        except ValueError:
+            return True
+        return (datetime.now(UTC) - checked).days >= STALE_AFTER_DAYS
+
     def _key(self, path: Path) -> str:
-        relative = path.relative_to(self.root).as_posix()
+        try:
+            relative = path.relative_to(self.root).as_posix()
+        except ValueError as error:
+            raise ManifestError(f"path is outside the archive root: {path}") from error
         if "\t" in relative or "\n" in relative:
             raise ManifestError(f"path contains tab or newline: {relative!r}")
         return relative

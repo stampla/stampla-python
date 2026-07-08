@@ -55,6 +55,11 @@ def run_verify(
         for tree, scan_root in _targets(config, root, paths):
             report.merge(_verify_tree(tool, tree, scan_root, config, options, manifest))
     if manifest is not None:
+        if manifest.stale_trusted:
+            report.hints.append(
+                f"{manifest.stale_trusted} cached digest(s) were trusted despite being"
+                " older than 180 days; run with --full for a deep check"
+            )
         manifest.save()
     return report
 
@@ -70,6 +75,8 @@ def _targets(config: Config, root: Path, paths: Sequence[Path]) -> list[tuple[Tr
         for path in paths:
             resolved = path.resolve()
             if resolved.is_relative_to(tree_root):
+                if not resolved.is_dir():
+                    raise ValueError(f"expected a directory, got: {path}")
                 targets.append((tree, resolved))
     if not targets:
         raise ValueError(
@@ -95,7 +102,13 @@ def _verify_tree(
         if file.status == FileStatus.MALFORMED:
             report.add(Finding(Bucket.MALFORMED, file.path, "name breaks the grammar"))
         elif file.status == FileStatus.UNNAMED:
-            report.add(Finding(Bucket.UNNAMED, file.path))
+            detail = ""
+            if file.path.name.endswith(".part"):
+                detail = (
+                    "leftover scratch file from an interrupted copy;"
+                    " check the journal, then delete it"
+                )
+            report.add(Finding(Bucket.UNNAMED, file.path, detail))
 
     families = group_by_prefix(files)
     report.families = len(families)

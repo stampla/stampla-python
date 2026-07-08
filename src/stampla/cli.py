@@ -13,10 +13,10 @@ from stampla.config import Config, ConfigError, load_config
 from stampla.dam import InjectOptions, run_inject
 from stampla.exiftool import ExifToolError
 from stampla.importer import apply_import, build_plan
-from stampla.journal import Journal, list_journals
+from stampla.journal import FamilyMove, Journal, list_journals
 from stampla.organize import run_organize
 from stampla.renamer import RenameOptions, run_rename
-from stampla.report import Bucket
+from stampla.report import Bucket, Finding, Report
 from stampla.verify import VerifyOptions, run_verify
 
 
@@ -113,12 +113,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     undo.add_argument("journal", nargs="?", type=Path, help="journal file to revert")
     undo.add_argument("--latest", action="store_true", help="revert the most recent journal")
+    undo.add_argument("--json", action="store_true", help="machine-readable output")
 
     resume = subparsers.add_parser(
         "resume",
         help="finish an interrupted journaled apply run",
     )
     resume.add_argument("journal", type=Path, help="journal file to resume")
+    resume.add_argument("--json", action="store_true", help="machine-readable output")
     return parser
 
 
@@ -147,6 +149,54 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
 
+def _emit(
+    args: argparse.Namespace,
+    command: str,
+    report: Report,
+    plan: tuple[FamilyMove, ...] = (),
+    applied: bool | None = None,
+    text_extra: list[str] | None = None,
+) -> None:
+    """One output shape for every command.
+
+    JSON envelope: ``{command, applied, plan, summary, findings}``;
+    ``applied`` is null for read-only commands. Text output prints the
+    plan (dry runs), the report, then any command-specific lines.
+    """
+    if args.json:
+        payload = json.loads(report.to_json())
+        payload["command"] = command
+        payload["applied"] = applied
+        payload["plan"] = [
+            {
+                "key": move.key,
+                "changes": [[str(r.old), str(r.new)] for r in move.renames],
+            }
+            for move in plan
+        ]
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    if applied is False:
+        for move in plan:
+            for rename in move.renames:
+                print(f"  {rename.old}  ->  {rename.new}")
+        if plan:
+            print()
+    print(report.render_text())
+    for line in text_extra or []:
+        print(line)
+
+
+def _journal_result_report(result: object) -> Report:
+    from stampla.apply import ApplyResult
+
+    assert isinstance(result, ApplyResult)
+    report = Report(ok=len(result.applied) + len(result.skipped))
+    for key, error in result.failed:
+        report.add(Finding(Bucket.APPLY_FAILED, Path(key), error))
+    return report
+
+
 def _run_undo_command(args: argparse.Namespace) -> int:
     journal_path = args.journal
     if journal_path is None and args.latest:
@@ -166,12 +216,18 @@ def _run_undo_command(args: argparse.Namespace) -> int:
     journal = Journal.load(journal_path)
     _print_journal_header("undo", journal)
     result = undo_journal(journal)
-    print(
-        f"undo {journal_path.name}: {len(result.applied)} family(ies) reverted,"
-        f" {len(result.skipped)} not applied, {len(result.failed)} failed"
+    report = _journal_result_report(result)
+    _emit(
+        args,
+        "undo",
+        report,
+        plan=journal.moves,
+        applied=True,
+        text_extra=[
+            f"\nundo {journal_path.name}: {len(result.applied)} family(ies) reverted,"
+            f" {len(result.skipped)} not applied, {len(result.failed)} failed"
+        ],
     )
-    for key, error in result.failed:
-        print(f"  FAILED {key}: {error}", file=sys.stderr)
     return 0 if result.ok else 1
 
 
@@ -181,12 +237,18 @@ def _run_resume_command(args: argparse.Namespace) -> int:
     journal = Journal.load(args.journal)
     _print_journal_header("resume", journal)
     result = apply_plan(journal)
-    print(
-        f"resume {args.journal.name}: {len(result.applied)} family(ies) applied,"
-        f" {len(result.skipped)} already done, {len(result.failed)} failed"
+    report = _journal_result_report(result)
+    _emit(
+        args,
+        "resume",
+        report,
+        plan=journal.moves,
+        applied=True,
+        text_extra=[
+            f"\nresume {args.journal.name}: {len(result.applied)} family(ies) applied,"
+            f" {len(result.skipped)} already done, {len(result.failed)} failed"
+        ],
     )
-    for key, error in result.failed:
-        print(f"  FAILED {key}: {error}", file=sys.stderr)
     return 0 if result.ok else 1
 
 
@@ -203,62 +265,37 @@ def _run_import_command(args: argparse.Namespace) -> int:
     plan = build_plan(config, root.resolve(), args.card, workers=args.workers)
     report = apply_import(plan, root.resolve()) if args.apply else plan.report
 
-    if args.json:
-        payload = json.loads(report.to_json())
-        payload["applied"] = args.apply
-        payload["planned"] = [
-            {
-                "family": move.key,
-                "copies": [[str(r.old), str(r.new)] for r in move.renames],
-            }
-            for move in plan.moves
-        ]
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
-    else:
-        if not args.apply:
-            for move in plan.moves:
-                for rename in move.renames:
-                    print(f"  {rename.old}  ->  {rename.new}")
-            if plan.moves:
-                print()
-        print(report.render_text())
-        if not args.apply and plan.moves:
-            print(f"\ndry run: {len(plan.moves)} group(s) would be imported; pass --apply to copy")
-        elif not report.has_problems:
-            already = sum(1 for f in report.findings if f.bucket is Bucket.ALREADY_IMPORTED)
-            ignored = sum(1 for f in report.findings if f.bucket is Bucket.IGNORED)
-            skipped = f", {ignored} file(s) ignored (listed above)" if ignored else ""
-            print(
-                f"\ncard fully accounted for: {report.ok} group(s) imported and verified,"
-                f" {already} already in the archive{skipped} — safe to format"
-            )
+    extra: list[str] = []
+    if not args.apply and plan.moves:
+        extra.append(
+            f"\ndry run: {len(plan.moves)} group(s) would be imported; pass --apply to copy"
+        )
+    elif args.apply and not report.has_problems:
+        already = sum(1 for f in report.findings if f.bucket is Bucket.ALREADY_IMPORTED)
+        ignored = sum(1 for f in report.findings if f.bucket is Bucket.IGNORED)
+        skipped = f", {ignored} file(s) ignored (listed above)" if ignored else ""
+        extra.append(
+            f"\ncard fully accounted for: {report.ok} group(s) imported and verified,"
+            f" {already} already in the archive{skipped} — safe to format"
+        )
+    _emit(args, "import", report, plan=plan.moves, applied=args.apply, text_extra=extra)
     return 1 if report.has_problems else 0
 
 
 def _run_organize_command(args: argparse.Namespace) -> int:
     config, root = _config_and_root(args)
     report, plan = run_organize(config, root.resolve(), args.path, workers=args.workers)
-    if args.json:
-        payload = json.loads(report.to_json())
-        payload["proposals"] = [
-            {
-                "group": move.key,
-                "files": [[str(r.old), str(r.new)] for r in move.renames],
-            }
-            for move in plan.moves
-        ]
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
-    else:
-        for move in plan.moves:
-            for rename in move.renames:
-                print(f"  {rename.old}  ->  {rename.new}")
-        if plan.moves:
-            print()
-        print(report.render_text())
-        print(
+    _emit(
+        args,
+        "organize",
+        report,
+        plan=plan.moves,
+        applied=False,
+        text_extra=[
             f"\n{len(plan.moves)} group(s) look importable; organize never renames —"
             " import confirmed batches with: stampla import <path> --apply"
-        )
+        ],
+    )
     return 1 if report.has_problems else 0
 
 
@@ -271,10 +308,11 @@ def _run_rename_command(args: argparse.Namespace) -> int:
         use_manifest=not args.no_manifest,
     )
     report, moves = run_rename(config, root.resolve(), tuple(args.paths), options)
-    print(report.to_json() if args.json else report.render_text())
-    if not args.json and not args.apply and moves:
+    extra: list[str] = []
+    if not args.apply and moves:
         total = sum(len(m.renames) for m in moves)
-        print(f"\ndry run: {total} rename(s) planned; pass --apply to execute")
+        extra.append(f"\ndry run: {total} rename(s) planned; pass --apply to execute")
+    _emit(args, "rename", report, plan=moves, applied=args.apply, text_extra=extra)
     return 1 if report.has_problems else 0
 
 
@@ -287,18 +325,18 @@ def _run_inject_command(args: argparse.Namespace) -> int:
         use_manifest=not args.no_manifest,
     )
     report = run_inject(config, root.resolve(), tuple(args.paths), options)
-    print(report.to_json() if args.json else report.render_text())
-    if not args.json:
-        written = sum(1 for f in report.findings if f.bucket is Bucket.TOKEN_WRITTEN)
-        pending = sum(1 for f in report.findings if f.bucket is Bucket.TOKEN_PENDING)
-        if pending:
-            print(f"\ndry run: {pending} token(s) would be written; pass --apply to write")
-        if written:
-            print(
-                f"\n{written} token(s) written. In the DAM: Read Metadata from Files"
-                " on the affected folders, then rename with the token template"
-                " (Lightroom Classic: the {Job Identifier} filename token)."
-            )
+    extra: list[str] = []
+    written = sum(1 for f in report.findings if f.bucket is Bucket.TOKEN_WRITTEN)
+    pending = sum(1 for f in report.findings if f.bucket is Bucket.TOKEN_PENDING)
+    if pending:
+        extra.append(f"\ndry run: {pending} token(s) would be written; pass --apply to write")
+    if written:
+        extra.append(
+            f"\n{written} token(s) written. In the DAM: Read Metadata from Files"
+            " on the affected folders, then rename with the token template"
+            " (Lightroom Classic: the {Job Identifier} filename token)."
+        )
+    _emit(args, "inject", report, applied=args.apply, text_extra=extra)
     return 1 if report.has_problems else 0
 
 
@@ -319,5 +357,5 @@ def _run_verify_command(args: argparse.Namespace) -> int:
         use_manifest=not args.no_manifest,
     )
     report = run_verify(config, root, args.paths, options)
-    print(report.to_json() if args.json else report.render_text())
+    _emit(args, "verify", report)
     return 1 if report.has_problems else 0

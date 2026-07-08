@@ -221,6 +221,23 @@ class TestVerifyEndToEnd:
         assert run_cli(archive, "--no-manifest")[0] == 0
         assert not (archive / ".stampla").exists()
 
+    def test_file_path_argument_is_an_error(self, archive: Path) -> None:
+        month = archive / "Photos" / "2026" / "2026-12"
+        master = make_master(month, "2026:12:05 12:30:00")
+        code = main(["verify", str(master), "--config", str(archive / "config.toml")])
+        assert code == 2
+
+    def test_part_leftover_is_explained(self, archive: Path) -> None:
+        month = archive / "Photos" / "2026" / "2026-11"
+        make_master(month, "2026:11:05 12:30:00")
+        (month / "somecopy.jpg.1234.part").write_bytes(b"torn")
+        code, payload = run_cli(archive)
+        assert code == 1
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        leftover = [f for f in findings if str(f["path"]).endswith(".part")]
+        assert "interrupted copy" in str(leftover[0]["detail"])
+
     def test_nothing_to_verify_is_an_error(self, archive: Path) -> None:
         code = main(["verify", "--config", str(archive / "config.toml")])
         assert code == 2

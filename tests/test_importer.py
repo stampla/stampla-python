@@ -279,6 +279,31 @@ class TestImportPolicies:
         assert "NIKON001.DSC" in ignored
         assert "NC_FLLST.DAT" in ignored
 
+    def test_enhanced_nr_dng_travels_with_its_raw(self, tmp_path: Path) -> None:
+        archive = self.configure(tmp_path, "")
+        card = tmp_path / "card"
+        self.make_raw_jpeg_pair(card, "DSC_0009", "2026:07:06 10:00:00")
+        (card / "DSC_0009-Enhanced-NR.dng").write_bytes(b"denoised")
+
+        code, payload = run_import(archive, card, "--apply")
+        assert code == 0, payload
+        month = archive / "Photos" / "2026" / "2026-07"
+        nef = next(month.glob("*.nef"))
+        prefix = nef.name.rsplit(".", 1)[0]
+        assert (month / f"{prefix}-Enhanced-NR.dng").exists()
+
+    def test_standalone_dng_is_its_own_master(self, tmp_path: Path) -> None:
+        archive = self.configure(tmp_path, "")
+        card = tmp_path / "card"
+        scratch = make_card_photo(card, "SCAN0001", "2026:07:07 09:00:00")
+        dng = card / "SCAN0001.dng"
+        scratch.rename(dng)
+
+        code, payload = run_import(archive, card, "--apply")
+        assert code == 0, payload
+        month = archive / "Photos" / "2026" / "2026-07"
+        assert len(list(month.glob("*.dng"))) == 1
+
     def test_ignore_all_jpegs_case_insensitively(self, tmp_path: Path) -> None:
         # in-camera RAW processing produces new-numbered JPEGs that are
         # not twins; a "*.jpg" ignore skips every JPEG regardless of case

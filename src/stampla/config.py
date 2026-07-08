@@ -193,12 +193,14 @@ class Config:
     def camera_extensions(self) -> frozenset[str]:
         """Extensions a camera writes as its own frame on a card.
 
-        Used by import grouping: tif/tiff are raw extensions for sidecar
-        grammar purposes but on a card they are editor output, so a
-        labeled ``…-Edit.tif`` merges into its RAW's group instead of
-        being mistaken for a separate photo.
+        Used by import grouping: tif/tiff/dng are raw extensions for
+        sidecar grammar purposes, but on a card they are usually editor
+        output — a labeled ``…-Edit.tif`` or ``…-Enhanced-NR.dng`` merges
+        into its RAW's group instead of being mistaken for a separate
+        photo. A standalone DNG or JPEG with no such RAW still imports
+        as its own master.
         """
-        return (self.raw_extensions - {"tif", "tiff"}) | self.video_extensions
+        return (self.raw_extensions - {"tif", "tiff", "dng"}) | self.video_extensions
 
     @property
     def grammar(self) -> Grammar:

@@ -91,6 +91,8 @@ class Report:
     ok: int = 0
     scanned: int = 0
     families: int = 0
+    #: informational lines that never affect the exit code
+    hints: list[str] = field(default_factory=list)
 
     def add(self, finding: Finding) -> None:
         self.findings.append(finding)
@@ -100,6 +102,7 @@ class Report:
         self.ok += other.ok
         self.scanned += other.scanned
         self.families += other.families
+        self.hints.extend(other.hints)
 
     @property
     def has_findings(self) -> bool:
@@ -133,6 +136,7 @@ class Report:
                 }
                 for finding in self.findings
             ],
+            "hints": list(self.hints),
         }
         return json.dumps(payload, indent=2, ensure_ascii=False)
 
@@ -152,4 +156,6 @@ class Report:
             for finding in group:
                 detail = f"  {finding.detail}" if finding.detail else ""
                 lines.append(f"  {finding.path}{detail}")
+        for hint in self.hints:
+            lines.append(f"\nhint: {hint}")
         return "\n".join(lines)
