@@ -4,18 +4,38 @@ on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.0
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.14"
+      - name: Install ExifTool
+        run: sudo apt-get update && sudo apt-get install -y libimage-exiftool-perl
+      - name: Run checks
+        run: |
+          python -m pip install -e ".[dev]"
+          ruff check .
+          ruff format --check .
+          mypy
+          pytest -q
+      - name: Tag must match the package version
+        run: |
+          version=$(python -c "import stampla; print(stampla.__version__)")
+          test "v$version" = "$GITHUB_REF_NAME" || {
+            echo "tag $GITHUB_REF_NAME does not match version $version" >&2
+            exit 1
+          }
       - name: Build distributions
         run: |
-          python -m pip install build
+          python -m pip install build twine
           python -m build
+          twine check dist/*
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist
@@ -35,7 +55,7 @@ jobs:
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
 
   github-release:
     needs: build

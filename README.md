@@ -45,14 +45,15 @@ from the card, so a transfer error cannot slip through. Nothing changes
 without `--apply`, and every apply is journaled and revertable with
 `stampla undo`.
 
-**Exit code 0 means the card is fully accounted for** — every file was
-either copied and verified now, or already sits in the archive with
-byte-identical content, or is hidden-directory junk explicitly listed as
-ignored. Anything else (unresolvable capture time, a same-name file in
-the archive with *different* content, a family only partially present)
+**After `--apply`, exit code 0 means the card is fully accounted for** —
+every file was either copied and verified, already sits in the archive
+with byte-identical content, or is explicitly listed as ignored (hidden
+paths, your `[import]` ignore globs, skipped JPEG twins — review that
+list once; anything you ignore by policy exists only on the card).
+Anything else (unresolvable capture time, a same-name file in the
+archive with *different* content, a family only partially present)
 exits 1 and blocks the "safe to format" verdict. Re-running `import`
-after an import is therefore the pre-format check: when it prints
-*safe to format*, nothing on the card exists only on the card.
+after an import is therefore the pre-format check.
 
 ### verify
 
@@ -80,12 +81,13 @@ code is `0` when clean, `1` with findings, `2` on errors.
 
 Hashes are cached in a per-machine manifest
 (`.stampla/manifest-<machine>.tsv` under the archive root), so repeat
-runs only hash new and touched files. A cached digest is trusted only
-while the file's size and mtime are unchanged; `--full` re-hashes
-everything regardless — run it periodically, since silent corruption that
-preserves size and mtime is exactly what the cache cannot see.
-`--no-manifest` disables the cache entirely. If you sync the archive
-between machines, exclude `.stampla/` from the sync.
+runs only hash new and touched files — `verify`, `rename` and `inject`
+all use it. A cached digest is trusted only while the file's size and
+mtime are unchanged; `--full` re-hashes everything regardless — run it
+periodically, since silent corruption that preserves size and mtime is
+exactly what the cache cannot see. `--no-manifest` disables the cache
+entirely. If you sync the archive between machines, exclude
+`.stampla/` from the sync.
 
 ### inject
 
@@ -147,10 +149,13 @@ progress. See [CHANGELOG.md](CHANGELOG.md).
 
 Safety first: every command is a dry run unless explicitly applied, and a
 file whose capture time cannot be resolved is reported, never renamed.
-Renames are validated as a whole before anything is touched, journaled to
-`~/.stampla/journals/` before the first change, applied atomically per
-file family, resumable after interruption, and revertable with
-`stampla undo`. Nothing is ever overwritten.
+Applies are validated as a whole before anything is touched, guarded by a
+per-archive lock, journaled to `~/.stampla/journals/` before the first
+change, applied atomically per file family, finishable after interruption
+with `stampla resume`, and revertable with `stampla undo` — which,
+for imported copies, re-verifies each file's digest and refuses to delete
+anything edited since. Nothing is ever overwritten. Exit codes everywhere:
+`0` clean, `1` findings needing attention, `2` errors.
 
 ## Configuration
 

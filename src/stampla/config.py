@@ -20,26 +20,11 @@ from stampla.pattern import DEFAULT_PATTERN, NamingPattern, PatternError
 
 _LAYOUT_TOKENS = frozenset({"yyyy", "mm", "dd"})
 
-DEFAULT_MUTABLE_EXTENSIONS = frozenset(
-    {
-        # image formats commonly edited in place
-        "dng",
-        "tif",
-        "tiff",
-        "jpg",
-        "jpeg",
-        "psd",
-        # sidecars change with every edit by design
-        "xmp",
-        "pp3",
-        "acr",
-        "nksc",
-        "fp2",
-        "fp3",
-        "vrd",
-        "spd",
-    }
-)
+# Only masters are content-checked (sidecars inherit their master's
+# prefix), so this lists master-capable formats edited in place. It
+# matters only for whole-file-hashed extensions: an extension in the
+# pattern's image_hash is judged by its pixels and never consults this.
+DEFAULT_MUTABLE_EXTENSIONS = frozenset({"dng", "tif", "tiff", "jpg", "jpeg", "psd"})
 
 DEFAULT_VIDEO_EXTENSIONS = frozenset(
     {
@@ -170,6 +155,19 @@ class Config:
         paths = [tree.path for tree in self.trees]
         if len(set(paths)) != len(paths):
             raise ConfigError("tree paths must be unique")
+        for outer in paths:
+            for inner in paths:
+                if inner != outer and inner.startswith(outer.rstrip("/") + "/"):
+                    raise ConfigError(
+                        f"tree {inner!r} is nested inside tree {outer!r};"
+                        " nested trees would be scanned twice"
+                    )
+        overlap = self.raw_extensions & self.video_extensions
+        if overlap:
+            raise ConfigError(
+                f"extension(s) {sorted(overlap)} appear in both extensions.raw"
+                " and extensions.video; an extension must belong to one kind"
+            )
         try:
             ZoneInfo(self.timezone)
         except ZoneInfoNotFoundError as exc:
@@ -181,6 +179,26 @@ class Config:
             for tree_path in self.dam.trees:
                 if tree_path not in known:
                     raise ConfigError(f"dam tree {tree_path!r} is not a configured tree")
+
+    @property
+    def photo_master_extensions(self) -> frozenset[str]:
+        """Extensions that can be a photo family's master.
+
+        The raw extensions plus plain JPEGs, so a JPEG-only photo that
+        import accepted stays verifiable, injectable and renamable.
+        """
+        return self.raw_extensions | frozenset({"jpg", "jpeg"})
+
+    @property
+    def camera_extensions(self) -> frozenset[str]:
+        """Extensions a camera writes as its own frame on a card.
+
+        Used by import grouping: tif/tiff are raw extensions for sidecar
+        grammar purposes but on a card they are editor output, so a
+        labeled ``…-Edit.tif`` merges into its RAW's group instead of
+        being mistaken for a separate photo.
+        """
+        return (self.raw_extensions - {"tif", "tiff"}) | self.video_extensions
 
     @property
     def grammar(self) -> Grammar:
@@ -321,14 +339,22 @@ def _extensions_from_dict(data: dict[str, Any]) -> dict[str, Any]:
     _reject_unknown_keys(data, {"raw", "video", "mutable"}, context="extensions")
     result: dict[str, Any] = {}
     if "raw" in data:
-        result["raw_extensions"] = frozenset(_string_list(data["raw"], "extensions.raw"))
+        result["raw_extensions"] = _extension_set(data["raw"], "extensions.raw")
     if "video" in data:
-        result["video_extensions"] = frozenset(_string_list(data["video"], "extensions.video"))
+        result["video_extensions"] = _extension_set(data["video"], "extensions.video")
     if "mutable" in data:
-        result["mutable_extensions"] = frozenset(
-            _string_list(data["mutable"], "extensions.mutable")
-        )
+        result["mutable_extensions"] = _extension_set(data["mutable"], "extensions.mutable")
     return result
+
+
+def _extension_set(value: Any, context: str) -> frozenset[str]:
+    extensions = frozenset(_string_list(value, context))
+    for extension in extensions:
+        if not re.fullmatch(r"[a-z0-9]+", extension):
+            raise ConfigError(
+                f"{context}: {extension!r} is not a bare lowercase extension (no dot, no uppercase)"
+            )
+    return extensions
 
 
 def _import_from_dict(data: dict[str, Any]) -> dict[str, Any]:

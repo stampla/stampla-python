@@ -34,6 +34,7 @@ class Bucket(Enum):
     RENAME_PENDING = "rename-pending"
     RENAMED = "renamed"
     MTIME_DATED = "mtime-dated"
+    APPLY_FAILED = "apply-failed"
 
 
 #: Findings that describe a safe, fully accounted-for state rather than a
@@ -53,6 +54,7 @@ SAFE_BUCKETS = frozenset(
 #: Rendering order: alarms first, expected drift and inventory last.
 _BUCKET_ORDER = (
     Bucket.CORRUPTION,
+    Bucket.APPLY_FAILED,
     Bucket.HASH_ERROR,
     Bucket.METADATA_UNREADABLE,
     Bucket.DATE_MISMATCH,

@@ -136,9 +136,10 @@ Resolved values are naive local wall-clock time — what a person at the
 scene would have read off a watch. Timestamps that are incomplete, zeroed
 or implausible never resolve; a file without a resolvable capture time is
 reported and skipped, because a wrong-but-plausible name is worse than no
-rename. For sources known to store only UTC (typically phone videos), a
-DST-aware conversion into a configured timezone is available and its use
-is always flagged in reports.
+rename. A chain entry suffixed `@utc` (for sources known to store only
+UTC, typically phone videos) converts DST-aware into the configured
+timezone, and the resolution source always carries the marker so reports
+show that a conversion happened.
 
 ## Families
 

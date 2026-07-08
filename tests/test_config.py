@@ -84,6 +84,27 @@ class TestValidation:
         with pytest.raises(ConfigError, match="relative"):
             config_from_dict({"trees": [{"path": path, "media": "photo"}]})
 
+    def test_nested_tree_paths(self) -> None:
+        with pytest.raises(ConfigError, match="nested"):
+            config_from_dict(
+                {
+                    "trees": [
+                        {"path": "Photos", "media": "photo"},
+                        {"path": "Photos/Scans", "media": "photo"},
+                    ]
+                }
+            )
+
+    def test_extension_in_both_raw_and_video(self) -> None:
+        with pytest.raises(ConfigError, match="both"):
+            config_from_dict({"extensions": {"raw": ["mov"], "video": ["mov"]}})
+
+    def test_camera_extensions_exclude_editor_output(self) -> None:
+        config = Config()
+        assert "tif" not in config.camera_extensions
+        assert "nef" in config.camera_extensions
+        assert "mov" in config.camera_extensions
+
     def test_duplicate_tree_paths(self) -> None:
         with pytest.raises(ConfigError, match="unique"):
             config_from_dict(

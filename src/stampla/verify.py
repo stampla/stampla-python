@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stampla.config import Config, Tree
-from stampla.dates import UnresolvedDate, resolve_date
+from stampla.dates import UnresolvedDate, chain_tags, resolve_date
 from stampla.digests import digest_under, naming_digests
 from stampla.exiftool import ExifTool
 from stampla.family import Family, group_by_prefix
@@ -101,7 +101,7 @@ def _verify_tree(
     report.families = len(families)
 
     if tree.media == "photo":
-        master_extensions = config.raw_extensions
+        master_extensions = config.photo_master_extensions
         chain = config.date_chain_photo
     else:
         master_extensions = config.video_extensions
@@ -112,7 +112,7 @@ def _verify_tree(
         for family in families
         for candidate in family.master_candidates(master_extensions)
     ]
-    tags = sorted({entry.partition(":")[2] or entry for entry in chain})
+    tags = sorted(chain_tags(chain))
     metadata = tool.read_metadata(candidates, tags) if candidates else {}
     digests: dict[Path, str] = {}
     hash_errors: dict[Path, str] = {}
@@ -207,7 +207,7 @@ def _classify_family(
     if tags is None:
         report.add(Finding(Bucket.METADATA_UNREADABLE, path))
         return None
-    resolved = resolve_date(tags, chain)
+    resolved = resolve_date(tags, chain, config.tzinfo)
     if isinstance(resolved, UnresolvedDate):
         report.add(Finding(Bucket.UNRESOLVED_DATE, path, resolved.reason))
         return None

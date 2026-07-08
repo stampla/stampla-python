@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stampla.config import Config, Tree
-from stampla.dates import ResolvedDate, resolve_date
+from stampla.dates import ResolvedDate, chain_tags, resolve_date
 from stampla.digests import naming_digests
 from stampla.exiftool import ExifTool
 from stampla.family import group_by_prefix
@@ -46,6 +46,8 @@ EMBEDDED_TOKEN_EXTENSIONS = frozenset({"jpg", "jpeg", "dng", "tif", "tiff", "psd
 class InjectOptions:
     apply: bool = False
     workers: int | None = None
+    full: bool = False
+    use_manifest: bool = True
 
 
 def run_inject(
@@ -56,7 +58,8 @@ def run_inject(
     if config.dam is None or not config.dam.trees:
         raise ValueError("no [dam] trees configured; nothing to inject into")
     report = Report()
-    manifest = Manifest.load(root.resolve())
+    manifest = Manifest.load(root.resolve()) if options.use_manifest else None
+    matched: set[Path] = set()
     with ExifTool() as tool:
         for tree in config.trees:
             if tree.path not in config.dam.trees:
@@ -64,13 +67,21 @@ def run_inject(
             scan_root = (root / tree.path).resolve()
             if paths:
                 scoped = [p.resolve() for p in paths if p.resolve().is_relative_to(scan_root)]
+                matched.update(scoped)
                 if not scoped:
                     continue
             else:
                 scoped = [scan_root]
             for target_root in scoped:
                 _inject_tree(tool, tree, target_root, config, options, report, manifest)
-    manifest.save()
+    if paths:
+        unmatched = [p for p in paths if p.resolve() not in matched]
+        if unmatched:
+            raise ValueError(
+                "path(s) outside every DAM-managed tree: " + ", ".join(str(p) for p in unmatched)
+            )
+    if manifest is not None:
+        manifest.save()
     return report
 
 
@@ -81,7 +92,7 @@ def _inject_tree(
     config: Config,
     options: InjectOptions,
     report: Report,
-    manifest: Manifest,
+    manifest: Manifest | None,
 ) -> None:
     files = list(scan_tree(scan_root, config.grammar, config.excludes))
     report.scanned += len(files)
@@ -98,10 +109,15 @@ def _inject_tree(
     ]
     assert config.dam is not None
     token_tag = config.dam.token_tag.partition(":")[2] or config.dam.token_tag
-    tags = sorted({entry.partition(":")[2] or entry for entry in chain} | {token_tag})
+    tags = sorted(chain_tags(chain) | {token_tag})
     metadata = tool.read_metadata(masters, tags) if masters else {}
-    digests, _ = naming_digests(
-        masters, config.pattern, tool, manifest=manifest, workers=options.workers
+    digests, digest_errors = naming_digests(
+        masters,
+        config.pattern,
+        tool,
+        manifest=manifest,
+        workers=options.workers,
+        full=options.full,
     )
 
     for family in families:
@@ -109,9 +125,15 @@ def _inject_tree(
         if master is None:
             continue  # orphan/ambiguous families are verify's business
         path = master.path
-        if path not in metadata or path not in digests:
+        if path in digest_errors:
+            report.add(Finding(Bucket.HASH_ERROR, path, digest_errors[path]))
             continue
-        resolved = resolve_date(metadata[path], chain)
+        if path not in metadata:
+            report.add(Finding(Bucket.METADATA_UNREADABLE, path))
+            continue
+        if path not in digests:
+            continue
+        resolved = resolve_date(metadata[path], chain, config.tzinfo)
         if not isinstance(resolved, ResolvedDate):
             report.add(Finding(Bucket.UNRESOLVED_DATE, path, resolved.reason))
             continue
@@ -156,12 +178,19 @@ def _inject_tree(
             )
             continue
         tool.execute("-overwrite_original", f"-{config.dam.token_tag}={derived}", str(target))
-        written = tool.read_metadata([target], [config.dam.token_tag.partition(":")[2]])
-        stored = next(iter(written.get(target, {}).values()), None)
+        written = tool.read_metadata([target], [token_tag])
+        stored = next(
+            (
+                value
+                for key, value in written.get(target, {}).items()
+                if key.endswith(f":{token_tag}")
+            ),
+            None,
+        )
         if stored != derived:
             report.add(
                 Finding(
-                    Bucket.HASH_ERROR,
+                    Bucket.APPLY_FAILED,
                     target,
                     f"token write not confirmed: read back {stored!r}",
                 )

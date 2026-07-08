@@ -16,13 +16,14 @@ skipped; they never abort the rest of the card.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
 
 from stampla.apply import apply_plan, validate_plan
 from stampla.config import Config, Tree
-from stampla.dates import ResolvedDate, resolve_date
+from stampla.dates import ResolvedDate, chain_tags, resolve_date
 from stampla.digests import naming_digests
 from stampla.exiftool import ExifTool
 from stampla.family import OriginalGroup, group_originals
@@ -69,7 +70,7 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
             continue
         files.append(path)
     report.scanned = len(files)
-    camera_extensions = (config.raw_extensions - {"tif", "tiff"}) | config.video_extensions
+    camera_extensions = config.camera_extensions
     groups = group_originals(files, config.sidecar_dirs, camera_extensions)
     report.families = len(groups)
 
@@ -89,12 +90,7 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
         masters[(group.directory, group.base)] = master
 
     master_paths = sorted(masters.values())
-    tags = sorted(
-        {
-            entry.partition(":")[2] or entry
-            for entry in config.date_chain_photo + config.date_chain_video
-        }
-    )
+    tags = sorted(chain_tags(config.date_chain_photo + config.date_chain_video))
     with ExifTool() as tool:
         metadata = tool.read_metadata(master_paths, tags) if master_paths else {}
         naming, naming_errors = naming_digests(master_paths, config.pattern, tool, workers=workers)
@@ -110,12 +106,23 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
         if tree is None:
             report.add(Finding(Bucket.UNNAMED, master, "no tree configured for this media kind"))
             continue
-        if master in hash_errors or master in naming_errors:
-            detail = naming_errors.get(master) or hash_errors.get(master, "")
-            report.add(Finding(Bucket.HASH_ERROR, master, detail))
+        broken = [m for m in group.members if m in hash_errors] + (
+            [master] if master in naming_errors else []
+        )
+        if broken:
+            first = broken[0]
+            detail = naming_errors.get(first) or hash_errors.get(first, "")
+            report.add(
+                Finding(
+                    Bucket.HASH_ERROR,
+                    first,
+                    f"unreadable; group {group.base!r} not imported: {detail}",
+                    related=tuple(m for m in group.members if m != first),
+                )
+            )
             continue
         chain = config.date_chain_video if is_video else config.date_chain_photo
-        resolved = resolve_date(metadata.get(master, {}), chain)
+        resolved = resolve_date(metadata.get(master, {}), chain, config.tzinfo)
         if not isinstance(resolved, ResolvedDate):
             report.add(Finding(Bucket.UNRESOLVED_DATE, master, resolved.reason))
             continue
@@ -152,9 +159,13 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
                     )
                 )
             continue
-        moves.append(FamilyMove(key=prefix, renames=tuple(renames)))
-        for rename in renames:
-            plan.expected[rename.new] = digests[rename.old][plan.algorithm]
+        recorded = tuple(
+            Rename(old=r.old, new=r.new, digest=digests[r.old][plan.algorithm]) for r in renames
+        )
+        moves.append(FamilyMove(key=prefix, renames=recorded))
+        for rename in recorded:
+            assert rename.digest is not None
+            plan.expected[rename.new] = rename.digest
         report.ok += 1
 
     plan.moves = tuple(moves)
@@ -170,15 +181,33 @@ def apply_import(plan: ImportPlan, root: Path, journal_dir: Path | None = None) 
     if problems:
         raise ValueError("plan failed validation:\n" + "\n".join(problems))
 
-    journal = Journal.create(root, plan.moves, directory=journal_dir, kind="copy")
+    journal = Journal.create(
+        root, plan.moves, directory=journal_dir, kind="copy", algorithm=plan.algorithm
+    )
+    print(f"journal: {journal.path}", file=sys.stderr)
     result = apply_plan(journal)
     for key, error in result.failed:
         report.ok -= 1
-        report.add(Finding(Bucket.HASH_ERROR, Path(key), f"import failed: {error}"))
+        report.add(Finding(Bucket.APPLY_FAILED, Path(key), f"import failed: {error}"))
 
+    failed_targets = {
+        rename.new
+        for move in plan.moves
+        if move.key in {key for key, _ in result.failed}
+        for rename in move.renames
+    }
     for target, expected in sorted(plan.expected.items()):
+        if target in failed_targets:
+            continue  # its group failed above, already reported
         if not target.is_file():
-            continue  # its group failed above
+            report.add(
+                Finding(
+                    Bucket.CORRUPTION,
+                    target,
+                    "copied file is missing at verification time — do not format the card",
+                )
+            )
+            continue
         actual = compute_digests(target, [plan.algorithm])[plan.algorithm]
         if actual != expected:
             report.add(

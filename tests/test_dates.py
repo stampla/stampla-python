@@ -148,6 +148,44 @@ class TestParseExiftoolDatetime:
         assert parse_exiftool_datetime(value) == expected
 
 
+class TestUtcChainMarker:
+    def test_marked_entry_converts_and_flags(self) -> None:
+        zone = ZoneInfo("Europe/Warsaw")
+        tags = {"QuickTime:CreateDate": "2025:06:15 14:09:10"}
+        result = resolve_date(tags, ("QuickTime:CreateDate@utc",), zone)
+        assert result == ResolvedDate(
+            value=datetime(2025, 6, 15, 16, 9, 10), source="QuickTime:CreateDate@utc"
+        )
+
+    def test_unqualified_marked_entry(self) -> None:
+        zone = ZoneInfo("Europe/Warsaw")
+        tags = {"QuickTime:CreateDate": "2025:01:15 12:00:00"}
+        result = resolve_date(tags, ("CreateDate@utc",), zone)
+        assert result == ResolvedDate(
+            value=datetime(2025, 1, 15, 13, 0, 0), source="QuickTime:CreateDate@utc"
+        )
+
+    def test_marker_requires_timezone(self) -> None:
+        with pytest.raises(ValueError, match="timezone"):
+            resolve_date({"QuickTime:CreateDate": "2025:06:15 14:09:10"}, ("CreateDate@utc",))
+
+    def test_unmarked_entries_never_convert(self) -> None:
+        zone = ZoneInfo("Europe/Warsaw")
+        tags = {"QuickTime:CreateDate": "2021:08:08 14:56:53"}  # BRAW: local in QT
+        result = resolve_date(tags, ("QuickTime:CreateDate",), zone)
+        assert result == ResolvedDate(
+            value=datetime(2021, 8, 8, 14, 56, 53), source="QuickTime:CreateDate"
+        )
+
+    def test_chain_tags_strips_markers(self) -> None:
+        from stampla.dates import chain_tags
+
+        assert chain_tags(("EXIF:DateTimeOriginal", "QuickTime:CreateDate@utc")) == {
+            "DateTimeOriginal",
+            "CreateDate",
+        }
+
+
 class TestUtcToWallClock:
     def test_summer_offset(self) -> None:
         zone = ZoneInfo("Europe/Warsaw")

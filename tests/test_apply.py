@@ -142,6 +142,166 @@ class TestApply:
         assert (root / "fine.nef").exists()
 
 
+class TestDisasterPaths:
+    def test_rollback_failure_reports_mixed_state(
+        self, root: Path, journal_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import stampla.apply as apply_module
+
+        make_file(root, "a.nef")
+        make_file(root, "a.xmp")
+        make_file(root, "blocked.xmp")
+        move = family(root, "a", ("a.nef", "renamed.nef"), ("a.xmp", "blocked.xmp"))
+        journal = Journal.create(root, (move,), directory=journal_dir)
+
+        real = apply_module._no_clobber_rename
+        calls = {"n": 0}
+
+        def flaky(old: Path, new: Path) -> None:
+            calls["n"] += 1
+            if calls["n"] >= 3:  # the rollback attempt
+                raise OSError("device gone")
+            real(old, new)
+
+        monkeypatch.setattr(apply_module, "_no_clobber_rename", flaky)
+        result = apply_plan(journal)
+        assert not result.ok
+        assert "ROLLBACK ALSO FAILED" in result.failed[0][1]
+        assert "restore from the journal manually" in result.failed[0][1]
+        assert journal.done_keys() == set()  # never marked done
+
+    def test_copy_family_cleans_up_after_midway_failure(
+        self, root: Path, journal_dir: Path
+    ) -> None:
+        card = root.parent / "card"
+        card.mkdir()
+        (card / "a.nef").write_bytes(b"a")
+        (card / "a.xmp").write_bytes(b"x")
+        make_file(root, "taken.xmp")  # second copy's target exists
+        move = FamilyMove(
+            key="a",
+            renames=(
+                Rename(old=card / "a.nef", new=root / "copied.nef"),
+                Rename(old=card / "a.xmp", new=root / "taken.xmp"),
+            ),
+        )
+        journal = Journal.create(root, (move,), directory=journal_dir, kind="copy")
+        result = apply_plan(journal)
+        assert not result.ok
+        assert not (root / "copied.nef").exists()  # partial copy removed
+        assert (card / "a.nef").exists()  # sources untouched
+        assert (card / "a.xmp").exists()
+
+    def test_failed_copy_leaves_no_scratch_files(
+        self, root: Path, journal_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import shutil as shutil_module
+
+        card = root.parent / "card2"
+        card.mkdir()
+        (card / "a.nef").write_bytes(b"a")
+
+        def exploding_copy(src: object, dst: object) -> None:
+            Path(str(dst)).write_bytes(b"torn")  # simulate a partial write
+            raise OSError("I/O error mid-copy")
+
+        monkeypatch.setattr(shutil_module, "copy2", exploding_copy)
+        move = FamilyMove(key="a", renames=(Rename(old=card / "a.nef", new=root / "b.nef"),))
+        journal = Journal.create(root, (move,), directory=journal_dir, kind="copy")
+        result = apply_plan(journal)
+        assert not result.ok
+        assert not (root / "b.nef").exists()
+        assert list(root.glob("*.part")) == []  # no torn scratch remains
+
+
+class TestSafetyGuarantees:
+    def test_archive_lock_excludes_second_apply(self, root: Path, journal_dir: Path) -> None:
+        from stampla.apply import ArchiveLockError, archive_lock
+
+        make_file(root, "a.nef")
+        move = family(root, "a", ("a.nef", "b.nef"))
+        journal = Journal.create(root, (move,), directory=journal_dir)
+        with archive_lock(root), pytest.raises(ArchiveLockError, match="lock"):
+            apply_plan(journal)
+        assert (root / "a.nef").exists()  # nothing happened under contention
+
+    def test_copy_undo_refuses_edited_destination(self, root: Path, journal_dir: Path) -> None:
+        import hashlib
+
+        card = root.parent / "cardx"
+        card.mkdir()
+        source = card / "a.nef"
+        source.write_bytes(b"payload")
+        digest = hashlib.md5(b"payload").hexdigest()
+        move = FamilyMove(
+            key="a",
+            renames=(Rename(old=source, new=root / "copied.nef", digest=digest),),
+        )
+        journal = Journal.create(root, (move,), directory=journal_dir, kind="copy")
+        assert apply_plan(journal).ok
+
+        (root / "copied.nef").write_bytes(b"EDITED SINCE IMPORT")
+        result = undo_journal(journal)
+        assert not result.ok
+        assert "refusing to delete" in result.failed[0][1]
+        assert (root / "copied.nef").exists()
+
+    def test_copy_undo_deletes_verified_copy(self, root: Path, journal_dir: Path) -> None:
+        import hashlib
+
+        card = root.parent / "cardy"
+        card.mkdir()
+        source = card / "a.nef"
+        source.write_bytes(b"payload")
+        digest = hashlib.md5(b"payload").hexdigest()
+        move = FamilyMove(
+            key="a",
+            renames=(Rename(old=source, new=root / "copied.nef", digest=digest),),
+        )
+        journal = Journal.create(root, (move,), directory=journal_dir, kind="copy")
+        assert apply_plan(journal).ok
+        assert undo_journal(journal).ok
+        assert not (root / "copied.nef").exists()
+        assert source.exists()
+
+    def test_crash_completed_family_is_recovered_on_resume(
+        self, root: Path, journal_dir: Path
+    ) -> None:
+        make_file(root, "a.nef")
+        move = family(root, "a", ("a.nef", "b.nef"))
+        journal = Journal.create(root, (move,), directory=journal_dir)
+        # simulate: the rename happened but the crash hit before mark_done
+        (root / "a.nef").rename(root / "b.nef")
+
+        result = apply_plan(journal)
+        assert result.ok
+        assert result.applied == ["a"]  # recognized, recorded, not redone
+        assert journal.done_keys() == {"a"}
+        assert (root / "b.nef").read_bytes() == b"a.nef"
+
+    def test_undo_then_reapply_via_tombstones(self, root: Path, journal_dir: Path) -> None:
+        make_file(root, "a.nef")
+        move = family(root, "a", ("a.nef", "b.nef"))
+        journal = Journal.create(root, (move,), directory=journal_dir)
+        assert apply_plan(journal).ok
+        assert undo_journal(journal).ok
+        assert journal.done_keys() == set()
+        # re-apply after undo works; the log was never rewritten
+        assert apply_plan(journal).applied == ["a"]
+        assert journal.done_keys() == {"a"}
+
+    def test_duplicate_journal_keys_are_rejected(self, root: Path, journal_dir: Path) -> None:
+        make_file(root, "a.nef")
+        make_file(root, "b.nef")
+        moves = (
+            family(root, "k", ("a.nef", "a2.nef")),
+            family(root, "k", ("b.nef", "b2.nef")),
+        )
+        assert any("duplicate journal key" in p for p in validate_plan(moves, root))
+        with pytest.raises(ValueError, match="unique"):
+            Journal.create(root, moves, directory=journal_dir)
+
+
 class TestUndo:
     def test_round_trip(self, root: Path, journal_dir: Path) -> None:
         make_file(root, "a.nef")
@@ -187,10 +347,10 @@ class TestJournal:
         assert reloaded.root == root
         assert reloaded.moves == (move,)
 
-    def test_list_journals_ordered(self, root: Path, journal_dir: Path) -> None:
+    def test_list_journals_in_creation_order(self, root: Path, journal_dir: Path) -> None:
         first = Journal.create(root, (), directory=journal_dir)
         second = Journal.create(root, (), directory=journal_dir)
-        assert list_journals(journal_dir) == sorted([first.path, second.path])
+        assert list_journals(journal_dir) == [first.path, second.path]
 
     def test_list_journals_empty_dir(self, tmp_path: Path) -> None:
         assert list_journals(tmp_path / "nope") == []
@@ -208,3 +368,19 @@ class TestUndoCli:
 
     def test_undo_missing_journal_is_an_error(self, tmp_path: Path) -> None:
         assert main(["undo", str(tmp_path / "missing.json")]) == 2
+
+    def test_resume_finishes_interrupted_run(self, root: Path, journal_dir: Path) -> None:
+        make_file(root, "a.nef")
+        make_file(root, "b.nef")
+        moves = (
+            family(root, "a", ("a.nef", "a2.nef")),
+            family(root, "b", ("b.nef", "b2.nef")),
+        )
+        journal = Journal.create(root, moves, directory=journal_dir)
+        journal.mark_done("a")
+        (root / "a.nef").rename(root / "a2.nef")  # family a was applied pre-crash
+
+        assert main(["resume", str(journal.path)]) == 0
+        assert (root / "a2.nef").exists()
+        assert (root / "b2.nef").exists()
+        assert journal.done_keys() == {"a", "b"}

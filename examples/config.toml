@@ -7,7 +7,9 @@
 # Archive root. Can also be given on the command line.
 root = "/mnt/archive"
 
-# Glob patterns to leave alone entirely.
+# Glob patterns to leave alone entirely (matched case-sensitively against
+# archive-relative paths; import's own ignore list below is separate and
+# case-insensitive, since cards use case-insensitive filesystems).
 excludes = ["**/CaptureOne/**", "*.cot"]
 
 [import]
@@ -55,7 +57,9 @@ digest_length = 8
 # Timezone used when only a UTC timestamp is available for a file.
 timezone = "Europe/Warsaw"
 # Metadata fields tried in order until one yields a capture time
-# (ExifTool tag names; an optional "Group:" prefix pins the tag group).
+# (ExifTool tag names; an optional "Group:" prefix pins the tag group;
+# an "@utc" suffix declares a UTC source, converted into the timezone
+# above and always flagged in reports — phone MP4s typically need it).
 photo = ["EXIF:DateTimeOriginal", "EXIF:CreateDate", "XMP:DateCreated"]
 video = ["DateTimeOriginal", "CreateDate", "QuickTime:CreateDate"]
 
@@ -63,10 +67,12 @@ video = ["DateTimeOriginal", "CreateDate", "QuickTime:CreateDate"]
 # Master extensions that sidecars may append to (prefix.nef.xmp).
 raw = ["nef", "cr2", "cr3", "raf", "rw2", "dng", "arw", "tif", "tiff"]
 # Video containers treated as masters in video trees.
-video = ["mov", "mp4", "braw", "nev", "r3d", "avi", "mkv"]
-# Formats edited in place: a content change is an edit, not corruption.
-mutable = ["dng", "tif", "tiff", "jpg", "jpeg", "psd",
-           "xmp", "pp3", "acr", "nksc", "fp2", "fp3", "vrd", "spd"]
+video = ["mov", "mp4", "m4v", "avi", "mkv", "braw", "nev", "r3d",
+         "mts", "m2ts", "3gp", "wmv", "asf", "mpg", "mpeg"]
+# Master formats edited in place: a whole-file content change on these is
+# an edit, not corruption. Only consulted for whole-file-hashed masters;
+# an extension in pattern.image_hash is judged by its pixels instead.
+mutable = ["dng", "tif", "tiff", "jpg", "jpeg", "psd"]
 
 # Sidecars kept in a subdirectory beside their masters
 # (<dir>/NKSC_PARAM/<master>.nksc belongs to <dir>/<master>).

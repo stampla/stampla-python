@@ -28,8 +28,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command")
 
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--config", type=Path, help="TOML configuration file")
+    common.add_argument("--root", type=Path, help="archive root (overrides the config)")
+    common.add_argument("--json", action="store_true", help="machine-readable output")
+    common.add_argument("--workers", type=int, help="parallel hashing processes")
+
+    applying = argparse.ArgumentParser(add_help=False)
+    applying.add_argument(
+        "--apply",
+        action="store_true",
+        help="make the planned changes; without this flag they are only shown",
+    )
+    hashing = argparse.ArgumentParser(add_help=False)
+    hashing.add_argument(
+        "--full",
+        action="store_true",
+        help="re-hash everything, ignoring the manifest cache",
+    )
+    hashing.add_argument(
+        "--no-manifest",
+        action="store_true",
+        help="neither read nor update the per-machine manifest",
+    )
+
     verify = subparsers.add_parser(
         "verify",
+        parents=[common, hashing],
         help="recompute names from metadata and content, report what disagrees",
     )
     verify.add_argument(
@@ -38,43 +63,22 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="limit verification to these paths (default: all configured trees)",
     )
-    verify.add_argument("--config", type=Path, help="TOML configuration file")
-    verify.add_argument("--root", type=Path, help="archive root (overrides the config)")
-    verify.add_argument("--json", action="store_true", help="machine-readable output")
     verify.add_argument(
         "--skip-hash",
         action="store_true",
         help="check capture times only; much faster, but misses content changes",
     )
-    verify.add_argument(
-        "--full",
-        action="store_true",
-        help="re-hash everything, ignoring the manifest cache",
-    )
-    verify.add_argument(
-        "--no-manifest",
-        action="store_true",
-        help="neither read nor update the per-machine manifest",
-    )
-    verify.add_argument("--workers", type=int, help="parallel hashing processes")
 
     import_cmd = subparsers.add_parser(
         "import",
+        parents=[common, applying],
         help="copy a memory card into the archive, named on arrival",
     )
     import_cmd.add_argument("card", type=Path, help="card or directory to import from")
-    import_cmd.add_argument("--config", type=Path, help="TOML configuration file")
-    import_cmd.add_argument("--root", type=Path, help="archive root (overrides the config)")
-    import_cmd.add_argument("--json", action="store_true", help="machine-readable output")
-    import_cmd.add_argument(
-        "--apply",
-        action="store_true",
-        help="actually copy; without this flag the plan is only shown",
-    )
-    import_cmd.add_argument("--workers", type=int, help="parallel hashing processes")
 
     inject = subparsers.add_parser(
         "inject",
+        parents=[common, applying, hashing],
         help="write computed names into the DAM's rename token for stale-named masters",
     )
     inject.add_argument(
@@ -83,28 +87,10 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="limit injection to these paths (default: all DAM-managed trees)",
     )
-    inject.add_argument("--config", type=Path, help="TOML configuration file")
-    inject.add_argument("--root", type=Path, help="archive root (overrides the config)")
-    inject.add_argument("--json", action="store_true", help="machine-readable output")
-    inject.add_argument(
-        "--apply",
-        action="store_true",
-        help="actually write tokens; without this flag intended writes are only shown",
-    )
-    inject.add_argument("--workers", type=int, help="parallel hashing processes")
-
-    organize = subparsers.add_parser(
-        "organize",
-        help="triage a messy tree: propose names, flag duplicates; never renames",
-    )
-    organize.add_argument("path", type=Path, help="messy directory to analyze")
-    organize.add_argument("--config", type=Path, help="TOML configuration file")
-    organize.add_argument("--root", type=Path, help="archive root (overrides the config)")
-    organize.add_argument("--json", action="store_true", help="machine-readable output")
-    organize.add_argument("--workers", type=int, help="parallel hashing processes")
 
     rename = subparsers.add_parser(
         "rename",
+        parents=[common, applying, hashing],
         help="rename files whose derived name differs, through the journaled engine",
     )
     rename.add_argument(
@@ -113,22 +99,26 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="limit renaming to these paths (default: all configured trees)",
     )
-    rename.add_argument("--config", type=Path, help="TOML configuration file")
-    rename.add_argument("--root", type=Path, help="archive root (overrides the config)")
-    rename.add_argument("--json", action="store_true", help="machine-readable output")
-    rename.add_argument(
-        "--apply",
-        action="store_true",
-        help="actually rename; without this flag the plan is only shown",
+
+    organize = subparsers.add_parser(
+        "organize",
+        parents=[common],
+        help="triage a messy tree: propose names, flag duplicates; never renames",
     )
-    rename.add_argument("--workers", type=int, help="parallel hashing processes")
+    organize.add_argument("path", type=Path, help="messy directory to analyze")
 
     undo = subparsers.add_parser(
         "undo",
-        help="revert a journaled apply run (most recent by default)",
+        help="revert a journaled apply run; without arguments, lists journals",
     )
     undo.add_argument("journal", nargs="?", type=Path, help="journal file to revert")
-    undo.add_argument("--list", action="store_true", help="list available journals")
+    undo.add_argument("--latest", action="store_true", help="revert the most recent journal")
+
+    resume = subparsers.add_parser(
+        "resume",
+        help="finish an interrupted journaled apply run",
+    )
+    resume.add_argument("journal", type=Path, help="journal file to resume")
     return parser
 
 
@@ -141,6 +131,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "undo":
             return _run_undo_command(args)
+        if args.command == "resume":
+            return _run_resume_command(args)
         if args.command == "import":
             return _run_import_command(args)
         if args.command == "inject":
@@ -156,17 +148,24 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_undo_command(args: argparse.Namespace) -> int:
-    if args.list:
-        for path in list_journals():
-            print(path)
-        return 0
     journal_path = args.journal
-    if journal_path is None:
+    if journal_path is None and args.latest:
         journals = list_journals()
         if not journals:
             raise ValueError("no journals found; nothing to undo")
         journal_path = journals[-1]
-    result = undo_journal(Journal.load(journal_path))
+    if journal_path is None:
+        journals = list_journals()
+        if not journals:
+            print("no journals found")
+            return 0
+        for path in journals:
+            print(path)
+        print("\npass a journal path (or --latest) to undo one", file=sys.stderr)
+        return 0
+    journal = Journal.load(journal_path)
+    _print_journal_header("undo", journal)
+    result = undo_journal(journal)
     print(
         f"undo {journal_path.name}: {len(result.applied)} family(ies) reverted,"
         f" {len(result.skipped)} not applied, {len(result.failed)} failed"
@@ -174,6 +173,29 @@ def _run_undo_command(args: argparse.Namespace) -> int:
     for key, error in result.failed:
         print(f"  FAILED {key}: {error}", file=sys.stderr)
     return 0 if result.ok else 1
+
+
+def _run_resume_command(args: argparse.Namespace) -> int:
+    from stampla.apply import apply_plan
+
+    journal = Journal.load(args.journal)
+    _print_journal_header("resume", journal)
+    result = apply_plan(journal)
+    print(
+        f"resume {args.journal.name}: {len(result.applied)} family(ies) applied,"
+        f" {len(result.skipped)} already done, {len(result.failed)} failed"
+    )
+    for key, error in result.failed:
+        print(f"  FAILED {key}: {error}", file=sys.stderr)
+    return 0 if result.ok else 1
+
+
+def _print_journal_header(action: str, journal: Journal) -> None:
+    print(
+        f"{action}: {journal.kind} journal with {len(journal.moves)} family(ies)"
+        f" under {journal.root}",
+        file=sys.stderr,
+    )
 
 
 def _run_import_command(args: argparse.Namespace) -> int:
@@ -242,7 +264,12 @@ def _run_organize_command(args: argparse.Namespace) -> int:
 
 def _run_rename_command(args: argparse.Namespace) -> int:
     config, root = _config_and_root(args)
-    options = RenameOptions(apply=args.apply, workers=args.workers)
+    options = RenameOptions(
+        apply=args.apply,
+        workers=args.workers,
+        full=args.full,
+        use_manifest=not args.no_manifest,
+    )
     report, moves = run_rename(config, root.resolve(), tuple(args.paths), options)
     print(report.to_json() if args.json else report.render_text())
     if not args.json and not args.apply and moves:
@@ -253,7 +280,12 @@ def _run_rename_command(args: argparse.Namespace) -> int:
 
 def _run_inject_command(args: argparse.Namespace) -> int:
     config, root = _config_and_root(args)
-    options = InjectOptions(apply=args.apply, workers=args.workers)
+    options = InjectOptions(
+        apply=args.apply,
+        workers=args.workers,
+        full=args.full,
+        use_manifest=not args.no_manifest,
+    )
     report = run_inject(config, root.resolve(), tuple(args.paths), options)
     print(report.to_json() if args.json else report.render_text())
     if not args.json:
@@ -288,4 +320,4 @@ def _run_verify_command(args: argparse.Namespace) -> int:
     )
     report = run_verify(config, root, args.paths, options)
     print(report.to_json() if args.json else report.render_text())
-    return 1 if report.has_findings else 0
+    return 1 if report.has_problems else 0

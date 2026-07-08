@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -22,6 +22,7 @@ classifiers = [
     "Intended Audience :: End Users/Desktop",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -32,6 +33,8 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/stampla/stampla"
+Repository = "https://github.com/stampla/stampla"
+Changelog = "https://github.com/stampla/stampla/blob/main/CHANGELOG.md"
 Issues = "https://github.com/stampla/stampla/issues"
 
 [project.scripts]

@@ -293,6 +293,45 @@ class TestHybridPattern:
         assert code == 1
         assert buckets_of(payload)[master.name] == "corruption"
 
+    def test_path_scoping_limits_verification(self, hybrid_archive: Path) -> None:
+        january = hybrid_archive / "Photos" / "2026" / "2026-01"
+        february = hybrid_archive / "Photos" / "2026" / "2026-02"
+        make_image_master(january, "2026:01:05 12:30:00")
+        make_image_master(february, "2026:02:05 12:30:00")
+        code, payload = run_cli(hybrid_archive, str(january))
+        summary = payload["summary"]
+        assert isinstance(summary, dict)
+        assert code == 0
+        assert summary["scanned"] == 1  # february untouched
+
+    def test_ambiguous_master_with_skip_hash_says_so(self, hybrid_archive: Path) -> None:
+        config = hybrid_archive / "config.toml"
+        config.write_text(config.read_text().replace('raw = ["jpg"]', 'raw = ["jpg", "nef"]'))
+        month = hybrid_archive / "Photos" / "2026" / "2026-09"
+        master = make_image_master(month, "2026:09:05 12:30:00")
+        twin = month / (master.stem + ".nef")  # second master candidate, same prefix
+        twin.write_bytes(b"conversion")
+        code, payload = run_cli(hybrid_archive, "--skip-hash")
+        assert code == 1
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        assert findings[0]["bucket"] == "ambiguous-master"
+        assert "--skip-hash" in str(findings[0]["detail"])
+
+    def test_junk_master_is_reported_undatable(self, hybrid_archive: Path) -> None:
+        config = hybrid_archive / "config.toml"
+        config.write_text(config.read_text().replace('raw = ["jpg"]', 'raw = ["jpg", "nef"]'))
+        month = hybrid_archive / "Photos" / "2026" / "2026-10"
+        month.mkdir(parents=True)
+        # a "nef" of pure junk: exiftool enumerates it but finds no dates
+        junk = month / "20261005_123000_deadbeef.nef"
+        junk.write_bytes(b"\x00\x01\x02not media")
+        code, payload = run_cli(hybrid_archive)
+        assert code == 1
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        assert findings[0]["bucket"] == "unresolved-date"
+
     def test_file_hash_named_master_is_other_pattern(self, hybrid_archive: Path) -> None:
         # named under the additional whole-file pattern: pending migration,
         # neither drift nor corruption

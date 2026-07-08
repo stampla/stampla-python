@@ -186,8 +186,9 @@ class ExifTool:
             )
             for entry in entries:
                 value = entry.get("ImageDataHash")
-                if isinstance(value, str) and value:
-                    results[Path(entry["SourceFile"])] = value.lower()
+                source = entry.get("SourceFile")
+                if isinstance(value, str) and value and source is not None:
+                    results[Path(source)] = value.lower()
         return results
 
     def _require_process(self) -> subprocess.Popen[bytes]:

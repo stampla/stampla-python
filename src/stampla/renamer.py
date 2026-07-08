@@ -20,12 +20,13 @@ applied per family with rollback, resumable, undoable.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from stampla.apply import apply_plan, validate_plan
 from stampla.config import Config, Tree
-from stampla.dates import ResolvedDate, resolve_date
+from stampla.dates import ResolvedDate, chain_tags, resolve_date
 from stampla.digests import naming_digests
 from stampla.exiftool import ExifTool
 from stampla.family import Family, group_by_prefix
@@ -40,6 +41,8 @@ class RenameOptions:
     apply: bool = False
     workers: int | None = None
     journal_dir: Path | None = None
+    full: bool = False
+    use_manifest: bool = True
 
 
 @dataclass
@@ -54,18 +57,27 @@ def run_rename(
     """Plan (and with ``apply``, execute) direct renames under ``root``."""
     options = options or RenameOptions()
     report = Report()
-    manifest = Manifest.load(root.resolve())
+    manifest = Manifest.load(root.resolve()) if options.use_manifest else None
     moves: list[FamilyMove] = []
+    matched: set[Path] = set()
     with ExifTool() as tool:
         for tree in config.trees:
             scan_root = (root / tree.path).resolve()
             if paths:
                 scoped = [p.resolve() for p in paths if p.resolve().is_relative_to(scan_root)]
+                matched.update(scoped)
             else:
                 scoped = [scan_root] if scan_root.is_dir() else []
             for target_root in scoped:
                 moves.extend(_plan_tree(tool, tree, target_root, config, options, report, manifest))
-    manifest.save()
+    if paths:
+        unmatched = [p for p in paths if p.resolve() not in matched]
+        if unmatched:
+            raise ValueError(
+                "path(s) outside every configured tree: " + ", ".join(str(p) for p in unmatched)
+            )
+    if manifest is not None:
+        manifest.save()
 
     if not options.apply:
         for move in moves:
@@ -84,9 +96,10 @@ def run_rename(
         if problems:
             raise ValueError("plan failed validation:\n" + "\n".join(problems))
         journal = Journal.create(root, tuple(moves), directory=options.journal_dir)
+        print(f"journal: {journal.path}", file=sys.stderr)
         result = apply_plan(journal)
         for key, error in result.failed:
-            report.add(Finding(Bucket.HASH_ERROR, Path(key), f"rename failed: {error}"))
+            report.add(Finding(Bucket.APPLY_FAILED, Path(key), f"rename failed: {error}"))
         applied = set(result.applied)
         for move in moves:
             if move.key in applied:
@@ -102,7 +115,7 @@ def _plan_tree(
     config: Config,
     options: RenameOptions,
     report: Report,
-    manifest: Manifest,
+    manifest: Manifest | None,
 ) -> list[FamilyMove]:
     files = list(scan_tree(scan_root, config.grammar, config.excludes))
     report.scanned += len(files)
@@ -110,21 +123,29 @@ def _plan_tree(
     report.families += len(families)
     dam_managed = config.dam is not None and tree.path in config.dam.trees
 
-    moves = _case_fixes(files, config)
+    if tree.media == "photo":
+        master_extensions = config.photo_master_extensions
+    else:
+        master_extensions = config.video_extensions
 
-    master_extensions = config.raw_extensions if tree.media == "photo" else config.video_extensions
+    moves = _case_fixes(files, config, dam_managed, master_extensions)
+
     chain = config.date_chain_photo if tree.media == "photo" else config.date_chain_video
-
     masters = {
         family.prefix: master
         for family in families
         if (master := family.master(master_extensions)) is not None
     }
-    tags = sorted({entry.partition(":")[2] or entry for entry in chain})
+    tags = sorted(chain_tags(chain))
     paths = sorted(master.path for master in masters.values())
     metadata = tool.read_metadata(paths, tags) if paths else {}
     digests, digest_errors = naming_digests(
-        paths, config.pattern, tool, manifest=manifest, workers=options.workers
+        paths,
+        config.pattern,
+        tool,
+        manifest=manifest,
+        workers=options.workers,
+        full=options.full,
     )
 
     for family in families:
@@ -135,9 +156,12 @@ def _plan_tree(
         if path in digest_errors:
             report.add(Finding(Bucket.HASH_ERROR, path, digest_errors[path]))
             continue
-        if path not in metadata or path not in digests:
+        if path not in metadata:
+            report.add(Finding(Bucket.METADATA_UNREADABLE, path))
             continue
-        resolved = resolve_date(metadata[path], chain)
+        if path not in digests:
+            continue
+        resolved = resolve_date(metadata[path], chain, config.tzinfo)
         if not isinstance(resolved, ResolvedDate):
             report.add(Finding(Bucket.UNRESOLVED_DATE, path, resolved.reason))
             continue
@@ -187,7 +211,12 @@ def _is_dam_owned(member: ScannedFile, master: ScannedFile) -> bool:
     )
 
 
-def _case_fixes(files: list[ScannedFile], config: Config) -> list[FamilyMove]:
+def _case_fixes(
+    files: list[ScannedFile],
+    config: Config,
+    dam_managed: bool,
+    master_extensions: frozenset[str],
+) -> list[FamilyMove]:
     """Malformed names that become canonical by lowercasing the extensions."""
     moves: list[FamilyMove] = []
     for file in files:
@@ -195,11 +224,21 @@ def _case_fixes(files: list[ScannedFile], config: Config) -> list[FamilyMove]:
             continue
         stem, dot, extensions = file.path.name.partition(".")
         candidate = f"{stem}{dot}{extensions.lower()}"
-        if candidate == file.path.name or config.grammar.parse(candidate) is None:
+        if candidate == file.path.name:
+            continue
+        parsed = config.grammar.parse(candidate)
+        if parsed is None:
+            continue
+        if dam_managed and (
+            (parsed.suffix == "" and parsed.raw_ext is None and parsed.ext in master_extensions)
+            or (parsed.suffix == "" and parsed.raw_ext is None and parsed.ext == "xmp")
+        ):
+            # a case-broken master or its plain sidecar is the DAM's file;
+            # renaming it behind the DAM's back breaks the catalog link
             continue
         moves.append(
             FamilyMove(
-                key=f"case:{file.path.name}",
+                key=f"case:{file.path}",
                 renames=(Rename(old=file.path, new=file.path.with_name(candidate)),),
             )
         )
