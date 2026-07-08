@@ -315,7 +315,8 @@ def _no_clobber_copy(old: Path, new: Path) -> None:
         shutil.copy2(old, scratch)
         if scratch.stat().st_size != old.stat().st_size:
             raise OSError(f"size mismatch copying {old}")
-        fd = os.open(scratch, os.O_RDONLY)
+        # Windows can only fsync a writable handle
+        fd = os.open(scratch, os.O_RDWR)
         try:
             os.fsync(fd)
         finally:

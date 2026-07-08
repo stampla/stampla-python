@@ -60,7 +60,8 @@ class TestOrganize:
         proposals = payload["proposals"]
         assert isinstance(proposals, list)
         assert len(proposals) == 1
-        assert "2019/2019-05" in str(proposals[0]["files"][0][1])
+        target = Path(str(proposals[0]["files"][0][1]))
+        assert target.parts[-4:-1] == ("Photos", "2019", "2019-05")
         assert not (archive / "Photos").exists()  # nothing moved
 
     def test_mtime_fallback_is_proposed_but_flagged(self, archive: Path, tmp_path: Path) -> None:
