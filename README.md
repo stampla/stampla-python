@@ -1,8 +1,11 @@
-# `stampla`
+# Stampla
 
 [![CI](https://github.com/stampla/stampla/actions/workflows/ci.yml/badge.svg)](https://github.com/stampla/stampla/actions/workflows/ci.yml)
 
 Deterministic, verifiable naming for photo and video archives.
+
+The name is Stampla in prose; the command, package, and all
+identifiers are `stampla`, and it is never two words.
 
 `stampla` names every file in an archive after what it is and when it
 happened:
