@@ -56,7 +56,7 @@ def run_verify(
     if options.use_manifest and not options.skip_hash:
         manifest = Manifest.load(root.resolve())
     report = Report()
-    with ExifTool() as tool:
+    with ExifTool(workers=options.workers) as tool:
         for tree, scan_root in _targets(config, root, paths):
             report.merge(_verify_tree(tool, tree, scan_root, config, options, manifest))
     if manifest is not None:

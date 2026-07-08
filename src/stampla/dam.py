@@ -65,7 +65,7 @@ def run_inject(
     report = Report()
     manifest = Manifest.load(root.resolve()) if options.use_manifest else None
     matched: set[Path] = set()
-    with ExifTool() as tool:
+    with ExifTool(workers=options.workers) as tool:
         for tree in config.trees:
             if tree.path not in config.dam.trees:
                 continue

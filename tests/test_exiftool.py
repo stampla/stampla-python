@@ -39,7 +39,7 @@ class FakeProcess:
 def fake_tool(monkeypatch: pytest.MonkeyPatch, stdout: bytes, stderr: bytes = b"") -> ExifTool:
     process = FakeProcess(stdout, stderr)
     monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
-    tool = ExifTool(executable="exiftool-under-test")
+    tool = ExifTool(executable="exiftool-under-test", workers=1)
     tool.start()
     return tool
 
@@ -50,7 +50,7 @@ class TestProtocol:
     ) -> None:
         tool = fake_tool(monkeypatch, b"13.55\n{ready1}\n")
         assert tool.execute("-ver") == "13.55\n"
-        sent = tool._process.stdin.getvalue()  # type: ignore[union-attr]
+        sent = tool._workers[0].process.stdin.getvalue()  # type: ignore[union-attr]
         assert sent == b"-ver\n-execute1\n"
 
     def test_sequential_commands_use_distinct_markers(

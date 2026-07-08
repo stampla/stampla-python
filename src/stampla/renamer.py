@@ -59,7 +59,7 @@ def run_rename(
     manifest = Manifest.load(root.resolve()) if options.use_manifest else None
     moves: list[FamilyMove] = []
     matched: set[Path] = set()
-    with ExifTool() as tool:
+    with ExifTool(workers=options.workers) as tool:
         for tree in config.trees:
             scan_root = (root / tree.path).resolve()
             if paths:

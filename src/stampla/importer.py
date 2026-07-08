@@ -89,7 +89,7 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
 
     master_paths = sorted(masters.values())
     tags = sorted(chain_tags(config.date_chain_photo + config.date_chain_video))
-    with ExifTool() as tool:
+    with ExifTool(workers=workers) as tool:
         metadata = tool.read_metadata(master_paths, tags) if master_paths else {}
         augment_with_name_timestamps(metadata, master_paths)
         naming, naming_errors = naming_digests(master_paths, config.pattern, tool, workers=workers)
