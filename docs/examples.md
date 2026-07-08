@@ -168,11 +168,29 @@ mtime-dated (113): # dateable only from file modification time — verify by han
 already-imported (30):
 ```
 
-Work through it in slices: move a reviewed batch into a staging folder,
-import it, repeat. Files whose capture time comes from mtime are
-proposed but flagged — mtime is hearsay, confirm before importing. If
-your import policy ignores JPEGs, remember it applies here too; triage
-an old JPEG-era dump with a config that includes them.
+Old dumps are full of files whose EXIF is gone but whose *name* still
+carries the capture time (`20190504_101112.jpg`, `PXL_20220612_…`,
+exports and thumbnails derived from well-named originals). `organize`
+recovers these automatically: a strict, year-first-only parser
+(`YYYY?MM?DD` then `HH?mm?ss`, consistent separators, validated ranges)
+ranks between real metadata and mtime, and such proposals are reported
+as `name-dated`. Day-first or US month-first names (`31.12.2016`,
+`12312016`) are never interpreted — month and day are indistinguishable
+across locales, and a wrong-but-plausible date is worse than none. To
+use the same source in other commands, add `File:NameTimestamp` to a
+date chain:
+
+```toml
+[dates]
+photo = ["EXIF:DateTimeOriginal", "EXIF:CreateDate",
+         "XMP:DateCreated", "File:NameTimestamp"]
+```
+
+Work through the dump in slices: move a reviewed batch into a staging
+folder, import it, repeat. Files whose capture time comes from mtime
+are proposed but flagged — mtime is hearsay, confirm before importing.
+If your import policy ignores JPEGs, remember it applies here too;
+triage an old JPEG-era dump with a config that includes them.
 
 ## 6. Changing the naming scheme (a migration)
 

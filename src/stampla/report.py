@@ -34,6 +34,7 @@ class Bucket(Enum):
     RENAME_PENDING = "rename-pending"
     RENAMED = "renamed"
     MTIME_DATED = "mtime-dated"
+    NAME_DATED = "name-dated"
     APPLY_FAILED = "apply-failed"
 
 
@@ -43,6 +44,7 @@ SAFE_BUCKETS = frozenset(
     {
         Bucket.ALREADY_IMPORTED,
         Bucket.IGNORED,
+        Bucket.NAME_DATED,
         Bucket.TOKEN_PENDING,
         Bucket.TOKEN_WRITTEN,
         Bucket.RENAME_PENDING,
@@ -65,6 +67,7 @@ _BUCKET_ORDER = (
     Bucket.NEEDS_SIDECAR,
     Bucket.OTHER_PATTERN,
     Bucket.MTIME_DATED,
+    Bucket.NAME_DATED,
     Bucket.MALFORMED,
     Bucket.EDIT_DRIFT,
     Bucket.UNNAMED,

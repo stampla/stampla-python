@@ -60,6 +60,10 @@ timezone = "Europe/Warsaw"
 # (ExifTool tag names; an optional "Group:" prefix pins the tag group;
 # an "@utc" suffix declares a UTC source, converted into the timezone
 # above and always flagged in reports — phone MP4s typically need it).
+# The synthetic "File:NameTimestamp" entry recovers a strict year-first
+# timestamp from the filename itself (20190504_101112.jpg) — useful as
+# a late entry for files whose metadata is gone; organize uses it
+# automatically, ranked above modification time.
 photo = ["EXIF:DateTimeOriginal", "EXIF:CreateDate", "XMP:DateCreated"]
 video = ["DateTimeOriginal", "CreateDate", "QuickTime:CreateDate"]
 

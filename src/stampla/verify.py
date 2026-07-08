@@ -21,7 +21,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stampla.config import Config, Tree
-from stampla.dates import UnresolvedDate, chain_tags, resolve_date
+from stampla.dates import (
+    UnresolvedDate,
+    augment_with_name_timestamps,
+    chain_tags,
+    resolve_date,
+)
 from stampla.digests import digest_under, naming_digests
 from stampla.exiftool import ExifTool
 from stampla.family import Family, group_by_prefix
@@ -127,6 +132,7 @@ def _verify_tree(
     ]
     tags = sorted(chain_tags(chain))
     metadata = tool.read_metadata(candidates, tags) if candidates else {}
+    augment_with_name_timestamps(metadata, candidates)
     digests: dict[Path, str] = {}
     hash_errors: dict[Path, str] = {}
     if not options.skip_hash and candidates:

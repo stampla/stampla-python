@@ -30,7 +30,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stampla.config import Config, Tree
-from stampla.dates import ResolvedDate, chain_tags, resolve_date
+from stampla.dates import (
+    ResolvedDate,
+    augment_with_name_timestamps,
+    chain_tags,
+    resolve_date,
+)
 from stampla.digests import naming_digests
 from stampla.exiftool import ExifTool
 from stampla.family import group_by_prefix
@@ -114,6 +119,7 @@ def _inject_tree(
     token_tag = config.dam.token_tag.partition(":")[2] or config.dam.token_tag
     tags = sorted(chain_tags(chain) | {token_tag})
     metadata = tool.read_metadata(masters, tags) if masters else {}
+    augment_with_name_timestamps(metadata, masters)
     digests, digest_errors = naming_digests(
         masters,
         config.pattern,

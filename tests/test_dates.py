@@ -17,6 +17,7 @@ from stampla.dates import (
     UnresolvedDate,
     parse_exiftool_datetime,
     resolve_date,
+    timestamp_from_name,
     utc_to_wall_clock,
 )
 
@@ -146,6 +147,47 @@ class TestParseExiftoolDatetime:
     )
     def test_parse(self, value: object, expected: datetime | None) -> None:
         assert parse_exiftool_datetime(value) == expected
+
+
+class TestTimestampFromName:
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("20190504_101112.jpg", datetime(2019, 5, 4, 10, 11, 12)),
+            ("VID_20190504_101112.mp4", datetime(2019, 5, 4, 10, 11, 12)),
+            ("2016-12-31 23.59.59.png", datetime(2016, 12, 31, 23, 59, 59)),
+            ("2016-12-31T23-59-59 party.jpg", datetime(2016, 12, 31, 23, 59, 59)),
+            # phone cameras: compact seconds followed by milliseconds
+            ("PXL_20220612_133017259.jpg", datetime(2022, 6, 12, 13, 30, 17)),
+            ("IMG_20180707_083818835.jpg", datetime(2018, 7, 7, 8, 38, 18)),
+            # canonical archive names carry their timestamp too
+            ("20200530_125438_7ea4f4fd_ref.jpg", datetime(2020, 5, 30, 12, 54, 38)),
+        ],
+    )
+    def test_recovers_year_first_timestamps(self, name: str, expected: datetime) -> None:
+        assert timestamp_from_name(name) == expected
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "31.12.2016 party.jpg",  # day-first: never interpreted
+            "doc_12312016_121212.jpg",  # US month-first: never interpreted
+            "IMG-20161231-WA0001.jpg",  # date only — no time to recover
+            "20210329_Hania_thumbnail.jpg",  # date only
+            "20260101_888888.jpg",  # not a valid time
+            "20261331_101112.jpg",  # not a valid month
+            "20260230_101112.jpg",  # February 30th
+            "2016-1231_101112.jpg",  # inconsistent date separators
+            "2016-12-31 23.5959.jpg",  # inconsistent time separators
+            # a real phone template bug: HH.<month>.SS in the time slot —
+            # the extra text between date and time keeps it unmatched, and
+            # that is correct, because its minutes field lies
+            ("2008.03.05 godz. 16.03.06.jpg"),
+            "IMG_4231.jpg",
+        ],
+    )
+    def test_never_guesses(self, name: str) -> None:
+        assert timestamp_from_name(name) is None
 
 
 class TestUtcChainMarker:

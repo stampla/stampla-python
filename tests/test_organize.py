@@ -64,6 +64,36 @@ class TestOrganize:
         assert target.parts[-4:-1] == ("Photos", "2019", "2019-05")
         assert not (archive / "Photos").exists()  # nothing moved
 
+    def test_name_timestamp_outranks_mtime(self, archive: Path, tmp_path: Path) -> None:
+        messy = tmp_path / "messy"
+        messy.mkdir()
+        # EXIF-less file whose name carries the capture time
+        (messy / "20190504_101112.jpg").write_bytes(TINY_JPEG)
+
+        code, payload = run_organize(archive, messy)
+        assert code == 0  # name-dated is informational, not a problem
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        assert [f["bucket"] for f in findings] == ["name-dated"]
+        plan = payload["plan"]
+        assert isinstance(plan, list)
+        assert "20190504_101112" in str(plan[0]["changes"][0][1])
+
+    def test_exif_outranks_name_timestamp(self, archive: Path, tmp_path: Path) -> None:
+        messy = tmp_path / "messy"
+        # EXIF says 2020, the (stale) name says 2019: metadata wins
+        photo = make_card_photo(messy, "IMG", "2020:06:15 08:00:00")
+        photo.rename(messy / "20190504_101112.jpg")
+
+        code, payload = run_organize(archive, messy)
+        assert code == 0
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        assert findings == []
+        plan = payload["plan"]
+        assert isinstance(plan, list)
+        assert "20200615_080000" in str(plan[0]["changes"][0][1])
+
     def test_mtime_fallback_is_proposed_but_flagged(self, archive: Path, tmp_path: Path) -> None:
         messy = tmp_path / "messy"
         messy.mkdir()

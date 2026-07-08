@@ -25,6 +25,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from stampla.config import Config
+from stampla.dates import NAME_TIMESTAMP_TAG
 from stampla.importer import ImportPlan, build_plan
 from stampla.report import Bucket, Finding, Report
 
@@ -37,14 +38,22 @@ def run_organize(
     """Plan the messy tree as import would, then annotate for triage."""
     fallback_config = replace(
         config,
-        date_chain_photo=(*config.date_chain_photo, MTIME_TAG),
-        date_chain_video=(*config.date_chain_video, MTIME_TAG),
+        date_chain_photo=(*config.date_chain_photo, NAME_TIMESTAMP_TAG, MTIME_TAG),
+        date_chain_video=(*config.date_chain_video, NAME_TIMESTAMP_TAG, MTIME_TAG),
     )
     plan = build_plan(fallback_config, root, path, workers=workers)
     report = plan.report
 
     for master, source in sorted(plan.date_sources.items()):
-        if source == MTIME_TAG:
+        if source == NAME_TIMESTAMP_TAG:
+            report.add(
+                Finding(
+                    Bucket.NAME_DATED,
+                    master,
+                    "no capture time in metadata; proposal uses the timestamp from the filename",
+                )
+            )
+        elif source == MTIME_TAG:
             report.add(
                 Finding(
                     Bucket.MTIME_DATED,
