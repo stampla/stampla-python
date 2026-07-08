@@ -112,7 +112,15 @@ def validate_plan(
                 problems.append(f"{move.key}: source missing: {rename.old}")
             if rename.new.exists() and not _is_case_only_rename(rename.old, rename.new):
                 problems.append(f"{move.key}: target already exists: {rename.new}")
-    overlap = sources & targets
+    # WindowsPath comparison folds case, so a case-only rename's own
+    # source and target compare equal there; that pair is not a conflict.
+    case_only: set[Path] = set()
+    for move in moves:
+        for rename in move.renames:
+            if _is_case_only_rename(rename.old, rename.new):
+                case_only.add(rename.old)
+                case_only.add(rename.new)
+    overlap = (sources & targets) - case_only
     for path in sorted(overlap):
         problems.append(f"path is both a source and a target: {path}")
     return problems
