@@ -1,10 +1,10 @@
-# stampla
+# `stampla`
 
 [![CI](https://github.com/stampla/stampla/actions/workflows/ci.yml/badge.svg)](https://github.com/stampla/stampla/actions/workflows/ci.yml)
 
 Deterministic, verifiable naming for photo and video archives.
 
-stampla names every file in an archive after what it is and when it
+`stampla` names every file in an archive after what it is and when it
 happened:
 
 ```
@@ -108,7 +108,7 @@ folders, then rename with the token template (Lightroom Classic: the
 
 The token lands in the master's `.xmp` sidecar for RAW files, or inside
 the file itself for embedded-metadata formats (JPEG, DNG, TIFF). A RAW
-without a sidecar is reported as `needs-sidecar` — stampla never
+without a sidecar is reported as `needs-sidecar` — `stampla` never
 fabricates sidecars, because a DAM reading a minimal script-made file
 could wipe catalog-side metadata. Save metadata from the DAM first,
 then rerun.
@@ -159,9 +159,11 @@ anything edited since. Nothing is ever overwritten. Exit codes everywhere:
 
 ## Configuration
 
-An archive is described by a TOML file (see
-[examples/config.toml](examples/config.toml)); every setting has a
-sensible default:
+An archive is described by a TOML file; every setting has a sensible
+default. See [docs/examples.md](docs/examples.md) for six complete
+setups — from a single folder of photos to a Lightroom workflow and a
+naming-scheme migration — and [examples/config.toml](examples/config.toml)
+for every option annotated:
 
 | section | what it configures |
 |---|---|

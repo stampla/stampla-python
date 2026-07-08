@@ -1,13 +1,13 @@
 # Design
 
-This document describes the concepts behind stampla. It grows alongside
+This document describes the concepts behind `stampla`. It grows alongside
 the implementation; sections are added as the corresponding modules land.
 
 ## Goals
 
 An archive of photos and videos should be able to answer two questions
 without external records: *is every file where and what its name claims,*
-and *has any file changed since it was named?* stampla answers both by
+and *has any file changed since it was named?* `stampla` answers both by
 making the filename itself the record — a deterministic function of the
 file's capture time and content.
 
@@ -104,7 +104,7 @@ persistent process (`-stay_open`) so that querying thousands of files does
 not pay its startup cost per file. No Python EXIF library is used: the
 formats that matter most (current RAW variants, video containers) are
 exactly where such libraries silently return nothing, and a silently
-missing date is the failure mode stampla exists to prevent.
+missing date is the failure mode `stampla` exists to prevent.
 
 Queries always use `-a` with group-qualified names, because the same tag
 name routinely appears several times in one file with different meanings.
@@ -257,7 +257,7 @@ embedding the content hash can never match the file that carries its own
 name. There is no fixpoint: injecting `date_H₀` produces content with
 hash `H₁`, injecting `date_H₁` produces `H₂`, forever.
 
-stampla resolves this by separating *naming* from *injecting*:
+`stampla` resolves this by separating *naming* from *injecting*:
 
 - **Import names files before any DAM sees them.** A scanned TIFF or a
   JPEG-only archive gets a name matching its exact bytes, untouched.
