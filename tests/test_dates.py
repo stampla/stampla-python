@@ -6,7 +6,10 @@ files of each container type; only the values matter, so they are inlined.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -17,9 +20,14 @@ from stampla.dates import (
     UnresolvedDate,
     parse_exiftool_datetime,
     resolve_date,
+    resolve_dates,
     timestamp_from_name,
     utc_to_wall_clock,
 )
+from stampla.manifest import Manifest
+
+if TYPE_CHECKING:
+    from stampla.exiftool import ExifTool
 
 # A Nikon NEF: DateTimeOriginal and CreateDate agree.
 NEF_TAGS = {
@@ -188,6 +196,90 @@ class TestTimestampFromName:
     )
     def test_never_guesses(self, name: str) -> None:
         assert timestamp_from_name(name) is None
+
+
+class CountingTool:
+    """A read_metadata stub standing in for ExifTool."""
+
+    def __init__(self, answers: dict[Path, dict[str, object]]) -> None:
+        self.answers = answers
+        self.reads = 0
+
+    def read_metadata(
+        self, paths: Sequence[Path], tags: Iterable[str]
+    ) -> dict[Path, dict[str, object]]:
+        self.reads += 1
+        return {p: dict(self.answers[p]) for p in paths if p in self.answers}
+
+
+def resolve(
+    paths: Sequence[Path],
+    chain: tuple[str, ...],
+    tool: CountingTool,
+    manifest: Manifest,
+    full: bool = False,
+) -> dict[Path, ResolvedDate | UnresolvedDate | None]:
+    return resolve_dates(paths, chain, None, cast("ExifTool", tool), manifest=manifest, full=full)
+
+
+class TestResolveDatesCache:
+    CHAIN = ("EXIF:DateTimeOriginal",)
+
+    def make(self, tmp_path: Path) -> tuple[Path, CountingTool, Manifest]:
+        root = tmp_path / "archive"
+        (root / "Photos").mkdir(parents=True)
+        photo = root / "Photos" / "a.nef"
+        photo.write_bytes(b"raw")
+        tool = CountingTool({photo: {"EXIF:DateTimeOriginal": "2026:06:01 10:00:00"}})
+        return photo, tool, Manifest.load(root)
+
+    def test_second_run_is_served_from_cache(self, tmp_path: Path) -> None:
+        photo, tool, manifest = self.make(tmp_path)
+        first = resolve([photo], self.CHAIN, tool, manifest)
+        second = resolve([photo], self.CHAIN, tool, manifest)
+        assert tool.reads == 1
+        assert first == second
+        assert first[photo] == ResolvedDate(
+            value=datetime(2026, 6, 1, 10, 0, 0), source="EXIF:DateTimeOriginal"
+        )
+
+    def test_mtime_change_forces_reread(self, tmp_path: Path) -> None:
+        import os
+
+        photo, tool, manifest = self.make(tmp_path)
+        resolve([photo], self.CHAIN, tool, manifest)
+        stat = photo.stat()
+        os.utime(photo, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        resolve([photo], self.CHAIN, tool, manifest)
+        assert tool.reads == 2
+
+    def test_chain_change_invalidates(self, tmp_path: Path) -> None:
+        photo, tool, manifest = self.make(tmp_path)
+        resolve([photo], self.CHAIN, tool, manifest)
+        resolve([photo], ("EXIF:CreateDate", *self.CHAIN), tool, manifest)
+        assert tool.reads == 2  # different chain, different cache key
+
+    def test_full_bypasses_cache(self, tmp_path: Path) -> None:
+        photo, tool, manifest = self.make(tmp_path)
+        resolve([photo], self.CHAIN, tool, manifest)
+        resolve([photo], self.CHAIN, tool, manifest, full=True)
+        assert tool.reads == 2
+
+    def test_unreadable_and_unresolved_are_never_cached(self, tmp_path: Path) -> None:
+        root = tmp_path / "archive"
+        (root / "Photos").mkdir(parents=True)
+        unreadable = root / "Photos" / "junk.nef"
+        unreadable.write_bytes(b"x")
+        undated = root / "Photos" / "undated.nef"
+        undated.write_bytes(b"y")
+        tool = CountingTool({undated: {}})
+        manifest = Manifest.load(root)
+
+        for _ in range(2):
+            result = resolve([unreadable, undated], self.CHAIN, tool, manifest)
+        assert tool.reads == 2  # nothing was cached
+        assert result[unreadable] is None
+        assert isinstance(result[undated], UnresolvedDate)
 
 
 class TestUtcChainMarker:

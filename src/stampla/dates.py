@@ -29,11 +29,17 @@ are deliberately ignored; the wall-clock part is the identity.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, tzinfo
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from stampla.exiftool import ExifTool
+    from stampla.manifest import Manifest
 
 _DATETIME_RE = re.compile(r"(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})")
 
@@ -175,6 +181,58 @@ def augment_with_name_timestamps(
         value = timestamp_from_name(path.name)
         if value is not None:
             metadata.setdefault(path, {})[NAME_TIMESTAMP_TAG] = value.strftime("%Y:%m:%d %H:%M:%S")
+
+
+def resolve_dates(
+    paths: Sequence[Path],
+    chain: Sequence[str],
+    zone: tzinfo | None,
+    tool: ExifTool,
+    manifest: Manifest | None = None,
+    full: bool = False,
+) -> dict[Path, ResolvedDate | UnresolvedDate | None]:
+    """Resolve capture times for many files, through the manifest cache.
+
+    A successful resolution is cached under the same size-and-mtime
+    trust rule as digests; any metadata write bumps mtime and forces a
+    re-read. The cache key covers the chain and timezone, so editing
+    either invalidates every cached resolution instead of serving the
+    old chain's answers. ``None`` means ExifTool could not read the
+    file at all (never cached), unresolvable dates are re-derived every
+    run (also never cached — they are rare and demand attention).
+    """
+    algorithm = f"date:{_chain_cache_key(chain, zone)}"
+    results: dict[Path, ResolvedDate | UnresolvedDate | None] = {}
+    misses: list[Path] = []
+    for path in paths:
+        cached = manifest.lookup(path, algorithm) if manifest is not None and not full else None
+        if cached is not None:
+            source, _, raw = cached.partition(" ")
+            results[path] = ResolvedDate(
+                value=datetime.strptime(raw, "%Y:%m:%d %H:%M:%S"), source=source
+            )
+        else:
+            misses.append(path)
+
+    if misses:
+        metadata = tool.read_metadata(misses, sorted(chain_tags(chain)))
+        augment_with_name_timestamps(metadata, misses)
+        for path in misses:
+            tags = metadata.get(path)
+            if tags is None:
+                results[path] = None
+                continue
+            resolved = resolve_date(tags, chain, zone)
+            results[path] = resolved
+            if isinstance(resolved, ResolvedDate) and manifest is not None:
+                stamp = resolved.value.strftime("%Y:%m:%d %H:%M:%S")
+                manifest.record(path, algorithm, f"{resolved.source} {stamp}")
+    return results
+
+
+def _chain_cache_key(chain: Sequence[str], zone: tzinfo | None) -> str:
+    material = "\x1f".join([*chain, str(zone) if zone is not None else ""])
+    return hashlib.md5(material.encode("utf-8")).hexdigest()[:8]
 
 
 def chain_tags(chain: Sequence[str]) -> set[str]:

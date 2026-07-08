@@ -21,12 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stampla.config import Config, Tree
-from stampla.dates import (
-    UnresolvedDate,
-    augment_with_name_timestamps,
-    chain_tags,
-    resolve_date,
-)
+from stampla.dates import ResolvedDate, UnresolvedDate, resolve_dates
 from stampla.digests import digest_under, naming_digests
 from stampla.exiftool import ExifTool
 from stampla.family import Family, group_by_prefix
@@ -52,9 +47,8 @@ def run_verify(
 ) -> Report:
     """Verify the configured trees (or the given subpaths) under ``root``."""
     options = options or VerifyOptions()
-    manifest = None
-    if options.use_manifest and not options.skip_hash:
-        manifest = Manifest.load(root.resolve())
+    # --skip-hash still loads the manifest: it caches dates, not just digests
+    manifest = Manifest.load(root.resolve()) if options.use_manifest else None
     report = Report()
     with ExifTool(workers=options.workers) as tool:
         for tree, scan_root in _targets(config, root, paths):
@@ -62,7 +56,7 @@ def run_verify(
     if manifest is not None:
         if manifest.stale_trusted:
             report.hints.append(
-                f"{manifest.stale_trusted} cached digest(s) were trusted despite being"
+                f"{manifest.stale_trusted} cached manifest entr(y/ies) were trusted despite being"
                 " older than 180 days; run with --full for a deep check"
             )
         manifest.save()
@@ -130,9 +124,9 @@ def _verify_tree(
         for family in families
         for candidate in family.master_candidates(master_extensions)
     ]
-    tags = sorted(chain_tags(chain))
-    metadata = tool.read_metadata(candidates, tags) if candidates else {}
-    augment_with_name_timestamps(metadata, candidates)
+    dates = resolve_dates(
+        candidates, chain, config.tzinfo, tool, manifest=manifest, full=options.full
+    )
     digests: dict[Path, str] = {}
     hash_errors: dict[Path, str] = {}
     if not options.skip_hash and candidates:
@@ -153,7 +147,7 @@ def _verify_tree(
             master_extensions,
             config,
             chain,
-            metadata,
+            dates,
             digests,
             hash_errors,
             options.skip_hash,
@@ -184,7 +178,7 @@ def _classify_family(
     master_extensions: frozenset[str],
     config: Config,
     chain: Sequence[str],
-    metadata: Mapping[Path, Mapping[str, object]],
+    dates: Mapping[Path, ResolvedDate | UnresolvedDate | None],
     digests: Mapping[Path, str],
     hash_errors: Mapping[Path, str],
     skip_hash: bool,
@@ -222,11 +216,10 @@ def _classify_family(
     if path in hash_errors:
         report.add(Finding(Bucket.HASH_ERROR, path, hash_errors[path]))
         return None
-    tags = metadata.get(path)
-    if tags is None:
+    resolved = dates.get(path)
+    if resolved is None:
         report.add(Finding(Bucket.METADATA_UNREADABLE, path))
         return None
-    resolved = resolve_date(tags, chain, config.tzinfo)
     if isinstance(resolved, UnresolvedDate):
         report.add(Finding(Bucket.UNRESOLVED_DATE, path, resolved.reason))
         return None

@@ -116,6 +116,19 @@ class TestFormat:
         )
         assert len(Manifest.load(root)) == 0
 
+    def test_one_file_carries_digest_and_date_rows(self, root: Path) -> None:
+        path = make_file(root, "a.jpg")
+        manifest = Manifest.load(root)
+        manifest.record(path, "md5-image", "abc123")
+        manifest.record(path, "date:cafe0123", "EXIF:DateTimeOriginal 2026:06:01 10:00:00")
+        manifest.save()
+
+        reloaded = Manifest.load(root)
+        assert reloaded.lookup(path, "md5-image") == "abc123"
+        assert reloaded.lookup(path, "date:cafe0123") == (
+            "EXIF:DateTimeOriginal 2026:06:01 10:00:00"
+        )
+
     def test_out_of_root_path_is_a_manifest_error(self, root: Path) -> None:
         narrow_root = root / "Photos"
         outside = root / "elsewhere.nef"

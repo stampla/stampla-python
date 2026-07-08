@@ -66,7 +66,7 @@ class Manifest:
     def __init__(self, root: Path, directory: str = ".stampla") -> None:
         self.root = root
         self.path = root / directory / f"manifest-{machine_name()}.tsv"
-        self._entries: dict[str, ManifestEntry] = {}
+        self._entries: dict[tuple[str, str], ManifestEntry] = {}
         self._dirty = False
         #: lookups served this session from entries older than the bound
         self.stale_trusted = 0
@@ -97,13 +97,17 @@ class Manifest:
                     )
                 except ValueError:
                     continue
-                manifest._entries[fields[0]] = entry
+                manifest._entries[fields[0], entry.algo] = entry
         return manifest
 
     def lookup(self, path: Path, algorithm: str) -> str | None:
-        """The stored digest, if size and mtime still vouch for it."""
-        entry = self._entries.get(self._key(path))
-        if entry is None or entry.algo != algorithm:
+        """The stored value, if size and mtime still vouch for it.
+
+        One file can carry several rows — its naming digest and its
+        resolved capture date live under different algorithm labels.
+        """
+        entry = self._entries.get((self._key(path), algorithm))
+        if entry is None:
             return None
         try:
             stat = path.stat()
@@ -119,7 +123,7 @@ class Manifest:
         """Store a freshly computed digest with the file's current stat."""
         key = self._key(path)
         stat = path.stat()
-        self._entries[key] = ManifestEntry(
+        self._entries[key, algorithm] = ManifestEntry(
             size=stat.st_size,
             mtime_ns=stat.st_mtime_ns,
             algo=algorithm,
@@ -136,8 +140,7 @@ class Manifest:
         scratch = self.path.with_suffix(".tsv.tmp")
         with scratch.open("w", encoding="utf-8") as stream:
             stream.write("\t".join(_COLUMNS) + "\n")
-            for key in sorted(self._entries):
-                entry = self._entries[key]
+            for (key, _algo), entry in sorted(self._entries.items()):
                 stream.write(
                     f"{key}\t{entry.size}\t{entry.mtime_ns}\t{entry.algo}"
                     f"\t{entry.digest}\t{entry.checked_at}\n"

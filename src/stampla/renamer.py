@@ -26,12 +26,7 @@ from pathlib import Path
 
 from stampla.apply import apply_plan, validate_plan
 from stampla.config import Config, Tree
-from stampla.dates import (
-    ResolvedDate,
-    augment_with_name_timestamps,
-    chain_tags,
-    resolve_date,
-)
+from stampla.dates import ResolvedDate, resolve_dates
 from stampla.digests import naming_digests
 from stampla.exiftool import ExifTool
 from stampla.family import Family, group_by_prefix
@@ -138,10 +133,8 @@ def _plan_tree(
         for family in families
         if (master := family.master(master_extensions)) is not None
     }
-    tags = sorted(chain_tags(chain))
     paths = sorted(master.path for master in masters.values())
-    metadata = tool.read_metadata(paths, tags) if paths else {}
-    augment_with_name_timestamps(metadata, paths)
+    dates = resolve_dates(paths, chain, config.tzinfo, tool, manifest=manifest, full=options.full)
     digests, digest_errors = naming_digests(
         paths,
         config.pattern,
@@ -159,12 +152,12 @@ def _plan_tree(
         if path in digest_errors:
             report.add(Finding(Bucket.HASH_ERROR, path, digest_errors[path]))
             continue
-        if path not in metadata:
+        resolved = dates.get(path)
+        if resolved is None:
             report.add(Finding(Bucket.METADATA_UNREADABLE, path))
             continue
         if path not in digests:
             continue
-        resolved = resolve_date(metadata[path], chain, config.tzinfo)
         if not isinstance(resolved, ResolvedDate):
             report.add(Finding(Bucket.UNRESOLVED_DATE, path, resolved.reason))
             continue
