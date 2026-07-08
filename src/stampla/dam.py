@@ -39,7 +39,7 @@ from stampla.report import Bucket, Finding, Report
 from stampla.scan import scan_tree
 
 #: formats whose metadata lives inside the file; the token goes there
-EMBEDDED_TOKEN_EXTENSIONS = frozenset({"jpg", "jpeg", "dng", "tif", "tiff", "psd"})
+EMBEDDED_TOKEN_EXTENSIONS = frozenset({"jpg", "jpeg", "dng", "tif", "tiff", "psd", "heic", "heif"})
 
 
 @dataclass(frozen=True)

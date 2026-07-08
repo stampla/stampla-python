@@ -22,7 +22,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 from stampla.apply import apply_plan, validate_plan
-from stampla.config import Config, Tree
+from stampla.config import LOOSE_MASTER_EXTENSIONS, Config, Tree
 from stampla.dates import ResolvedDate, chain_tags, resolve_date
 from stampla.digests import naming_digests
 from stampla.exiftool import ExifTool
@@ -256,12 +256,12 @@ def _master_of(
             if member.suffix.lstrip(".").lower() in config.raw_extensions
         ]
         return raws[0] if len(raws) == 1 else None
-    # a lone photo without a camera-native RAW (a standalone DNG or a
-    # JPEG-only shot) is its own master
+    # a lone photo without a camera-native RAW (a JPEG or HEIC shot,
+    # a standalone DNG) is its own master
     loose = [
         member
         for member in group.members
-        if base_named(member) and member.suffix.lstrip(".").lower() in {"jpg", "jpeg", "dng"}
+        if base_named(member) and member.suffix.lstrip(".").lower() in LOOSE_MASTER_EXTENSIONS
     ]
     return loose[0] if len(loose) == 1 else None
 

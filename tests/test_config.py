@@ -105,6 +105,10 @@ class TestValidation:
         assert "nef" in config.camera_extensions
         assert "mov" in config.camera_extensions
 
+    def test_photo_masters_include_loose_formats(self) -> None:
+        masters = Config().photo_master_extensions
+        assert {"jpg", "heic", "heif", "dng", "nef"} <= masters
+
     def test_duplicate_tree_paths(self) -> None:
         with pytest.raises(ConfigError, match="unique"):
             config_from_dict(

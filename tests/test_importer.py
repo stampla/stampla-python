@@ -292,6 +292,20 @@ class TestImportPolicies:
         prefix = nef.name.rsplit(".", 1)[0]
         assert (month / f"{prefix}-Enhanced-NR.dng").exists()
 
+    def test_standalone_heic_is_its_own_master(self, tmp_path: Path) -> None:
+        # phone shot: JPEG payload named .heic — master selection and
+        # grouping are name-based, content codec is irrelevant here
+        archive = self.configure(tmp_path, "")
+        card = tmp_path / "card"
+        scratch = make_card_photo(card, "IMG_5001", "2026:07:08 09:00:00")
+        heic = card / "IMG_5001.HEIC"
+        scratch.rename(heic)
+
+        code, payload = run_import(archive, card, "--apply")
+        assert code == 0, payload
+        month = archive / "Photos" / "2026" / "2026-07"
+        assert len(list(month.glob("*.heic"))) == 1
+
     def test_standalone_dng_is_its_own_master(self, tmp_path: Path) -> None:
         archive = self.configure(tmp_path, "")
         card = tmp_path / "card"
