@@ -217,24 +217,37 @@ def _emit(
     text_extra: list[str] | None = None,
     verdict: ImportVerdict | None = None,
     result: ApplyResult | None = None,
+    root: Path | None = None,
 ) -> None:
     """One output shape for every command.
 
-    JSON envelope: ``{command, applied, plan, summary, findings, hints,
-    verdict, result}``; ``applied`` is null for read-only commands,
-    ``verdict`` is import's safe-to-format decision (null elsewhere and
-    on dry runs), ``result`` counts a journaled run's families (undo and
-    resume). Text output prints the plan (dry runs), the report, then
-    any command-specific lines.
+    JSON envelope, format 1: ``{format, command, applied, root, summary,
+    findings, hints, plan, verdict, result}``. ``applied`` is null for
+    read-only commands, ``verdict`` is import's safe-to-format decision
+    (null elsewhere and on dry runs), ``result`` counts a journaled
+    run's families (undo and resume). The archive root is stated once
+    and every path under it is root-relative; paths outside it (card
+    files) stay absolute. Text output prints the plan (dry runs), the
+    report, then any command-specific lines.
     """
     if args.json:
-        payload = json.loads(report.to_json())
-        payload["command"] = command
-        payload["applied"] = applied
+
+        def render(path: Path) -> str:
+            if root is not None and path.is_relative_to(root):
+                return str(path.relative_to(root))
+            return str(path)
+
+        payload: dict[str, object] = {
+            "format": 1,
+            "command": command,
+            "applied": applied,
+            "root": str(root) if root is not None else None,
+        }
+        payload.update(json.loads(report.to_json(root)))
         payload["plan"] = [
             {
                 "key": move.key,
-                "changes": [[str(r.old), str(r.new)] for r in move.renames],
+                "changes": [[render(r.old), render(r.new)] for r in move.renames],
             }
             for move in plan
         ]
@@ -290,6 +303,7 @@ def _run_journals_command(args: argparse.Namespace) -> int:
     summaries = journal_summaries(root=root.resolve() if root else None)
     if args.json:
         payload = {
+            "format": 1,
             "command": "journals",
             "journals": [
                 {
@@ -347,6 +361,7 @@ def _run_undo_command(args: argparse.Namespace) -> int:
             f" {len(result.skipped)} not applied, {len(result.failed)} failed"
         ],
         result=result,
+        root=journal.root.resolve(),
     )
     return 0 if result.ok else 1
 
@@ -370,6 +385,7 @@ def _run_resume_command(args: argparse.Namespace) -> int:
             f" {len(result.skipped)} already done, {len(result.failed)} failed"
         ],
         result=result,
+        root=journal.root.resolve(),
     )
     return 0 if result.ok else 1
 
@@ -420,6 +436,7 @@ def _run_import_command(args: argparse.Namespace) -> int:
         applied=args.apply,
         text_extra=extra,
         verdict=verdict,
+        root=root.resolve(),
     )
     return 1 if report.has_problems else 0
 
@@ -440,6 +457,7 @@ def _run_organize_command(args: argparse.Namespace) -> int:
             f"\n{len(plan.moves)} group(s) look importable; organize never renames —"
             " import confirmed batches with: stampla import <path> --apply"
         ],
+        root=root.resolve(),
     )
     return 1 if report.has_problems else 0
 
@@ -458,7 +476,15 @@ def _run_rename_command(args: argparse.Namespace) -> int:
     if not args.apply and moves:
         total = sum(len(m.renames) for m in moves)
         extra.append(f"\ndry run: {total} rename(s) planned; pass --apply to execute")
-    _emit(args, "rename", report, plan=moves, applied=args.apply, text_extra=extra)
+    _emit(
+        args,
+        "rename",
+        report,
+        plan=moves,
+        applied=args.apply,
+        text_extra=extra,
+        root=root.resolve(),
+    )
     return 1 if report.has_problems else 0
 
 
@@ -483,7 +509,7 @@ def _run_inject_command(args: argparse.Namespace) -> int:
             " on the affected folders, then rename with the token template"
             " (Lightroom Classic: the {Job Identifier} filename token)."
         )
-    _emit(args, "inject", report, applied=args.apply, text_extra=extra)
+    _emit(args, "inject", report, applied=args.apply, text_extra=extra, root=root.resolve())
     return 1 if report.has_problems else 0
 
 
@@ -505,5 +531,5 @@ def _run_verify_command(args: argparse.Namespace) -> int:
     )
     with _progress() as monitor:
         report = run_verify(config, root, args.paths, options, monitor)
-    _emit(args, "verify", report)
+    _emit(args, "verify", report, root=root.resolve())
     return 1 if report.has_problems else 0

@@ -168,21 +168,33 @@ class Report:
             result[finding.bucket.value] = result.get(finding.bucket.value, 0) + 1
         return result
 
-    def to_json(self) -> str:
+    def to_json(self, root: Path | None = None) -> str:
+        """Render as JSON; with ``root``, paths under it become relative.
+
+        Stating the root once and keeping every path relative to it makes
+        the output smaller and stable across mounts; paths outside the
+        root (files on a memory card) stay absolute.
+        """
+
+        def render(path: Path) -> str:
+            if root is not None and path.is_relative_to(root):
+                return str(path.relative_to(root))
+            return str(path)
+
         payload = {
             "summary": {
                 "scanned": self.scanned,
                 "families": self.families,
                 "ok": self.ok,
-                **self.counts(),
+                "buckets": self.counts(),
             },
             "findings": [
                 {
                     "bucket": finding.bucket.value,
                     "severity": finding.bucket.severity.value,
-                    "path": str(finding.path),
+                    "path": render(finding.path),
                     "detail": finding.detail,
-                    "related": [str(path) for path in finding.related],
+                    "related": [render(path) for path in finding.related],
                     **({"data": dict(finding.data)} if finding.data else {}),
                 }
                 for finding in self.findings

@@ -230,7 +230,10 @@ def build_plan(
                         master,
                         f"identical content already in archive ({destination / prefix}*)",
                         related=tuple(m for m in members if m != master),
-                        data={"prefix": prefix, "destination": str(destination)},
+                        data={
+                            "prefix": prefix,
+                            "destination": str(destination.relative_to(root)),
+                        },
                     )
                 )
             continue

@@ -117,11 +117,14 @@ class TestVerifyEndToEnd:
 
         code, payload = run_cli(archive)
         assert code == 1
+        assert payload["format"] == 1
+        assert payload["root"] == str(archive.resolve())
         by_name = buckets_of(payload)
         assert by_name[renamed.name] == "date-mismatch"
         assert by_name[corrupted.name] == "corruption"
         findings = payload["findings"]
         assert isinstance(findings, list)
+        assert not Path(str(findings[0]["path"])).is_absolute()  # root-relative
         by_path = {Path(str(f["path"])).name: f for f in findings}
         mismatch_data = by_path[renamed.name]["data"]
         assert mismatch_data["name_datetime"] == "20260106_110000"

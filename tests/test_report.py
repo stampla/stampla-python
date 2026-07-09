@@ -63,9 +63,18 @@ class TestJson:
     def test_round_trips(self) -> None:
         payload = json.loads(sample_report().to_json())
         assert payload["summary"]["ok"] == 2
-        assert payload["summary"]["corruption"] == 1
+        assert payload["summary"]["buckets"]["corruption"] == 1
         # paths are rendered in the platform's native form
         assert payload["findings"][2]["related"] == [str(Path("a/z.nef"))]
+
+    def test_paths_become_relative_to_the_root(self) -> None:
+        root = Path("/archive").resolve()
+        report = Report()
+        report.add(Finding(Bucket.CORRUPTION, root / "Photos" / "x.nef"))
+        report.add(Finding(Bucket.UNNAMED, Path("/elsewhere/card/y.jpg")))
+        findings = json.loads(report.to_json(root))["findings"]
+        assert findings[0]["path"] == str(Path("Photos") / "x.nef")
+        assert findings[1]["path"] == str(Path("/elsewhere/card/y.jpg"))
 
     def test_findings_carry_their_severity(self) -> None:
         payload = json.loads(sample_report().to_json())

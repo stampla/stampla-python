@@ -204,6 +204,18 @@ right exactly when their master's is. Ambiguous families (a RAW plus a
 conversion carrying the same prefix) are settled by evidence: the
 candidate whose content hash matches the prefix is the master.
 
+## The JSON envelope
+
+Every command emits one shape with `--json`, versioned as `format: 1`:
+`{format, command, applied, root, summary, findings, hints, plan,
+verdict, result}`. Keys that do not apply are null rather than absent,
+so a consumer never probes for shape. Bucket counts sit under
+`summary.buckets`; the archive root is stated once and every path under
+it is root-relative (smaller output, stable across machines and
+mounts), while paths outside it — files on a memory card — stay
+absolute. The version number only moves for breaking changes; additive
+keys do not bump it.
+
 ## Progress and cancellation
 
 Long operations accept a `Monitor` — a progress callback plus a
