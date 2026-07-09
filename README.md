@@ -160,8 +160,8 @@ is unresolvable. There is no `--apply`; import confirmed batches with
 
 ## Status
 
-Early development; command surface complete, release preparation in
-progress. See [CHANGELOG.md](CHANGELOG.md).
+Early development; the command surface is complete. Installable from
+PyPI as `stampla`. See [CHANGELOG.md](CHANGELOG.md).
 
 Safety first: every command is a dry run unless explicitly applied, and a
 file whose capture time cannot be resolved is reported, never renamed.
