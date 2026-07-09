@@ -216,6 +216,12 @@ mounts), while paths outside it — files on a memory card — stay
 absolute. The version number only moves for breaking changes; additive
 keys do not bump it.
 
+`--json-stream` turns the same output into NDJSON: throttled
+`{"event": "progress", ...}` lines while the command runs, then the
+envelope — tagged `"event": "result"` — as the final line. A process
+supervising a long run (a front end driving the CLI as a subprocess)
+reads stdout line by line and never needs a timeout heuristic.
+
 ## Progress and cancellation
 
 Long operations accept a `Monitor` — a progress callback plus a

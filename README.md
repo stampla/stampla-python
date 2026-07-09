@@ -88,8 +88,10 @@ capture times, name collisions (duplicate content), malformed and unnamed
 files, orphaned sidecars and masters that exist in several formats.
 
 `--skip-hash` checks capture times only — fast enough for a whole archive
-between full runs. `--json` emits the report machine-readably; the exit
-code is `0` when clean, `1` with findings, `2` on errors.
+between full runs. `--json` emits the report machine-readably, and
+`--json-stream` emits NDJSON — progress events while the command runs,
+the result as the last line. The exit code is `0` when clean, `1` with
+findings, `2` on errors.
 
 Hashes and resolved capture times are cached in a per-machine manifest
 (`.stampla/manifest-<machine>.tsv` under the archive root), so repeat

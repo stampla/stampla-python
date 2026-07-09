@@ -257,6 +257,21 @@ class TestVerifyEndToEnd:
         code = main(["verify", "--config", str(archive / "config.toml")])
         assert code == 2
 
+    def test_json_stream_emits_progress_then_result(self, archive: Path) -> None:
+        month = archive / "Photos" / "2026" / "2026-09"
+        make_master(month, "2026:09:05 12:30:00")
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = main(["verify", "--config", str(archive / "config.toml"), "--json-stream"])
+        assert code == 0
+        lines = [json.loads(line) for line in buffer.getvalue().splitlines() if line]
+        assert all("event" in line for line in lines)
+        assert any(line["event"] == "progress" for line in lines)
+        result = lines[-1]
+        assert result["event"] == "result"
+        assert result["format"] == 1
+        assert result["summary"]["ok"] == 1
+
 
 def image_hash_of(path: Path) -> str:
     return subprocess.run(

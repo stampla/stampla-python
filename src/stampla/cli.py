@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -36,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--config", type=Path, help="TOML configuration file")
     common.add_argument("--root", type=Path, help="archive root (overrides the config)")
     common.add_argument("--json", action="store_true", help="machine-readable output")
+    common.add_argument(
+        "--json-stream",
+        action="store_true",
+        help="NDJSON on stdout: progress events while running, the result envelope last",
+    )
     common.add_argument("--workers", type=int, help="parallel hashing processes")
 
     applying = argparse.ArgumentParser(add_help=False)
@@ -135,6 +140,11 @@ def build_parser() -> argparse.ArgumentParser:
     undo.add_argument("journal", nargs="?", type=Path, help="journal file to revert")
     undo.add_argument("--latest", action="store_true", help="revert the most recent journal")
     undo.add_argument("--json", action="store_true", help="machine-readable output")
+    undo.add_argument(
+        "--json-stream",
+        action="store_true",
+        help="NDJSON on stdout: progress events while running, the result envelope last",
+    )
 
     resume = subparsers.add_parser(
         "resume",
@@ -142,6 +152,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     resume.add_argument("journal", type=Path, help="journal file to resume")
     resume.add_argument("--json", action="store_true", help="machine-readable output")
+    resume.add_argument(
+        "--json-stream",
+        action="store_true",
+        help="NDJSON on stdout: progress events while running, the result envelope last",
+    )
     return parser
 
 
@@ -179,20 +194,45 @@ def main(argv: list[str] | None = None) -> int:
         return 130
 
 
-@contextmanager
-def _progress() -> Iterator[Monitor]:
-    """A live, throttled progress line on stderr when it is a terminal."""
-    if not sys.stderr.isatty():
-        yield Monitor()
-        return
+def _throttled(handler: Callable[[ProgressEvent], None]) -> Callable[[ProgressEvent], None]:
+    """At most ten events a second — a fast phase would otherwise emit
+    thousands — but a phase's final event (done == total) always lands."""
     last = 0.0
 
-    def render(event: ProgressEvent) -> None:
+    def wrapped(event: ProgressEvent) -> None:
         nonlocal last
         now = time.monotonic()
         if now - last < 0.1 and event.done != event.total:
-            return  # a fast phase would otherwise repaint thousands of times
+            return
         last = now
+        handler(event)
+
+    return wrapped
+
+
+@contextmanager
+def _progress(args: argparse.Namespace) -> Iterator[Monitor]:
+    """Progress: NDJSON events on stdout with ``--json-stream``,
+    otherwise a live line on stderr when it is a terminal."""
+    if getattr(args, "json_stream", False):
+
+        def emit(event: ProgressEvent) -> None:
+            line = {
+                "event": "progress",
+                "phase": event.phase,
+                "done": event.done,
+                "total": event.total,
+                "path": str(event.path) if event.path is not None else None,
+            }
+            print(json.dumps(line, ensure_ascii=False), flush=True)
+
+        yield Monitor(callback=_throttled(emit))
+        return
+    if not sys.stderr.isatty():
+        yield Monitor()
+        return
+
+    def render(event: ProgressEvent) -> None:
         total = f"/{event.total}" if event.total else ""
         name = f"  {event.path.name}" if event.path is not None else ""
         print(
@@ -203,7 +243,7 @@ def _progress() -> Iterator[Monitor]:
         )
 
     try:
-        yield Monitor(callback=render)
+        yield Monitor(callback=_throttled(render))
     finally:
         print("\r\x1b[2K", end="", file=sys.stderr, flush=True)
 
@@ -229,8 +269,12 @@ def _emit(
     and every path under it is root-relative; paths outside it (card
     files) stay absolute. Text output prints the plan (dry runs), the
     report, then any command-specific lines.
+
+    With ``--json-stream`` the same envelope is the final NDJSON line,
+    tagged ``"event": "result"``, after the progress events.
     """
-    if args.json:
+    stream = getattr(args, "json_stream", False)
+    if args.json or stream:
 
         def render(path: Path) -> str:
             if root is not None and path.is_relative_to(root):
@@ -238,6 +282,7 @@ def _emit(
             return str(path)
 
         payload: dict[str, object] = {
+            **({"event": "result"} if stream else {}),
             "format": 1,
             "command": command,
             "applied": applied,
@@ -270,7 +315,7 @@ def _emit(
             if result is not None
             else None
         )
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        print(json.dumps(payload, indent=None if stream else 2, ensure_ascii=False))
         return
     if applied is False:
         for move in plan:
@@ -347,7 +392,7 @@ def _run_undo_command(args: argparse.Namespace) -> int:
         return 0
     journal = Journal.load(journal_path)
     _print_journal_header("undo", journal)
-    with _progress() as monitor:
+    with _progress(args) as monitor:
         result = undo_journal(journal, monitor=monitor)
     report = _journal_result_report(result)
     _emit(
@@ -371,7 +416,7 @@ def _run_resume_command(args: argparse.Namespace) -> int:
 
     journal = Journal.load(args.journal)
     _print_journal_header("resume", journal)
-    with _progress() as monitor:
+    with _progress(args) as monitor:
         result = apply_plan(journal, monitor=monitor)
     report = _journal_result_report(result)
     _emit(
@@ -400,7 +445,7 @@ def _print_journal_header(action: str, journal: Journal) -> None:
 
 def _run_import_command(args: argparse.Namespace) -> int:
     config, root = _config_and_root(args)
-    with _progress() as monitor:
+    with _progress(args) as monitor:
         plan = build_plan(
             config,
             root.resolve(),
@@ -443,7 +488,7 @@ def _run_import_command(args: argparse.Namespace) -> int:
 
 def _run_organize_command(args: argparse.Namespace) -> int:
     config, root = _config_and_root(args)
-    with _progress() as monitor:
+    with _progress(args) as monitor:
         report, plan = run_organize(
             config, root.resolve(), args.path, workers=args.workers, monitor=monitor
         )
@@ -470,7 +515,7 @@ def _run_rename_command(args: argparse.Namespace) -> int:
         full=args.full,
         use_manifest=not args.no_manifest,
     )
-    with _progress() as monitor:
+    with _progress(args) as monitor:
         report, moves = run_rename(config, root.resolve(), tuple(args.paths), options, monitor)
     extra: list[str] = []
     if not args.apply and moves:
@@ -496,7 +541,7 @@ def _run_inject_command(args: argparse.Namespace) -> int:
         full=args.full,
         use_manifest=not args.no_manifest,
     )
-    with _progress() as monitor:
+    with _progress(args) as monitor:
         report = run_inject(config, root.resolve(), tuple(args.paths), options, monitor)
     extra: list[str] = []
     written = sum(1 for f in report.findings if f.bucket is Bucket.TOKEN_WRITTEN)
@@ -529,7 +574,7 @@ def _run_verify_command(args: argparse.Namespace) -> int:
         full=args.full,
         use_manifest=not args.no_manifest,
     )
-    with _progress() as monitor:
+    with _progress(args) as monitor:
         report = run_verify(config, root, args.paths, options, monitor)
     _emit(args, "verify", report, root=root.resolve())
     return 1 if report.has_problems else 0
