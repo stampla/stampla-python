@@ -35,6 +35,7 @@ from pathlib import Path
 
 from stampla.hashing import compute_digests
 from stampla.journal import FamilyMove, Journal, Rename
+from stampla.progress import Monitor
 
 
 @dataclass
@@ -126,14 +127,27 @@ def validate_plan(
     return problems
 
 
-def apply_plan(journal: Journal) -> ApplyResult:
+def apply_plan(journal: Journal, monitor: Monitor | None = None) -> ApplyResult:
     """Apply a journaled plan; families already done (or found complete
-    on disk after a crash) are skipped or recovered, never redone."""
+    on disk after a crash) are skipped or recovered, never redone.
+
+    The monitor sees one event per family and can cancel between
+    families — an interruption in the journal's own terms: finish with
+    resume, or revert with undo.
+    """
+    monitor = monitor or Monitor()
     result = ApplyResult()
     done = journal.done_keys()
     is_copy = journal.kind == "copy"
     with archive_lock(journal.root):
-        for move in journal.moves:
+        for index, move in enumerate(journal.moves):
+            # cancel only between families; done counts completed ones
+            monitor.step(
+                journal.kind,
+                index,
+                len(journal.moves),
+                move.renames[0].old if move.renames else None,
+            )
             if move.key in done:
                 result.skipped.append(move.key)
                 continue
@@ -154,20 +168,28 @@ def apply_plan(journal: Journal) -> ApplyResult:
                 result.applied.append(move.key)
             else:
                 result.failed.append((move.key, error))
+        monitor.emit(journal.kind, len(journal.moves), len(journal.moves))
     return result
 
 
-def undo_journal(journal: Journal) -> ApplyResult:
+def undo_journal(journal: Journal, monitor: Monitor | None = None) -> ApplyResult:
     """Revert every done family of a journal, most recent first.
 
     Undoing a rename renames back; undoing a copy deletes the copies —
     after verifying each destination still matches the recorded digest,
     so an edited or replaced file is never deleted.
     """
+    monitor = monitor or Monitor()
     result = ApplyResult()
     done = journal.done_keys()
     with archive_lock(journal.root):
-        for move in reversed(journal.moves):
+        for index, move in enumerate(reversed(journal.moves)):
+            monitor.step(
+                "undo",
+                index,
+                len(journal.moves),
+                move.renames[0].new if move.renames else None,
+            )
             if move.key not in done:
                 result.skipped.append(move.key)
                 continue
@@ -186,6 +208,7 @@ def undo_journal(journal: Journal) -> ApplyResult:
                 result.applied.append(move.key)
             else:
                 result.failed.append((move.key, error))
+        monitor.emit("undo", len(journal.moves), len(journal.moves))
     return result
 
 

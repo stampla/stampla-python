@@ -204,6 +204,18 @@ right exactly when their master's is. Ambiguous families (a RAW plus a
 conversion carrying the same prefix) are settled by evidence: the
 candidate whose content hash matches the prefix is the master.
 
+## Progress and cancellation
+
+Long operations accept a `Monitor` — a progress callback plus a
+should-cancel probe. Events are per-item where work is long (hashing,
+copying, renaming; one event per file or family) and coarse where it is
+batched (date resolution through ExifTool). Cancellation is cooperative
+and only lands at safe points: between files while planning, between
+families while applying — so a cancelled apply is exactly the journal's
+interruption case, finishable with resume or revertable with undo. The
+CLI renders events as a single live line on stderr when it is a
+terminal, and Ctrl-C exits with code 130 and a pointer to resume.
+
 ## The hash manifest
 
 Hashing a large archive is minutes of work; doing it on every verify run

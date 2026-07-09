@@ -32,6 +32,7 @@ from stampla.exiftool import ExifTool
 from stampla.family import Family, group_by_prefix
 from stampla.journal import FamilyMove, Journal, Rename
 from stampla.manifest import Manifest
+from stampla.progress import Monitor
 from stampla.report import Bucket, Finding, Report
 from stampla.scan import FileStatus, ScannedFile, scan_tree
 
@@ -46,10 +47,15 @@ class RenameOptions:
 
 
 def run_rename(
-    config: Config, root: Path, paths: tuple[Path, ...] = (), options: RenameOptions | None = None
+    config: Config,
+    root: Path,
+    paths: tuple[Path, ...] = (),
+    options: RenameOptions | None = None,
+    monitor: Monitor | None = None,
 ) -> tuple[Report, tuple[FamilyMove, ...]]:
     """Plan (and with ``apply``, execute) direct renames under ``root``."""
     options = options or RenameOptions()
+    monitor = monitor or Monitor()
     report = Report()
     manifest = Manifest.load(root.resolve()) if options.use_manifest else None
     moves: list[FamilyMove] = []
@@ -66,7 +72,9 @@ def run_rename(
             else:
                 scoped = [scan_root] if scan_root.is_dir() else []
             for target_root in scoped:
-                moves.extend(_plan_tree(tool, tree, target_root, config, options, report, manifest))
+                moves.extend(
+                    _plan_tree(tool, tree, target_root, config, options, report, manifest, monitor)
+                )
     if paths:
         unmatched = [p for p in paths if p.resolve() not in matched]
         if unmatched:
@@ -95,7 +103,7 @@ def run_rename(
             raise ValueError("plan failed validation:\n" + "\n".join(problems))
         journal = Journal.create(root, tuple(moves), directory=options.journal_dir)
         print(f"journal: {journal.path}", file=sys.stderr)
-        result = apply_plan(journal)
+        result = apply_plan(journal, monitor=monitor)
         for key, error in result.failed:
             report.add(Finding(Bucket.APPLY_FAILED, Path(key), f"rename failed: {error}"))
         applied = set(result.applied)
@@ -121,8 +129,10 @@ def _plan_tree(
     options: RenameOptions,
     report: Report,
     manifest: Manifest | None,
+    monitor: Monitor,
 ) -> list[FamilyMove]:
     files = list(scan_tree(scan_root, config.grammar, config.excludes))
+    monitor.step("scan", len(files), 0)
     report.scanned += len(files)
     families = group_by_prefix(files)
     report.families += len(families)
@@ -142,7 +152,9 @@ def _plan_tree(
         if (master := family.master(master_extensions)) is not None
     }
     paths = sorted(master.path for master in masters.values())
+    monitor.step("dates", 0, len(paths))
     dates = resolve_dates(paths, chain, config.tzinfo, tool, manifest=manifest, full=options.full)
+    monitor.step("dates", len(paths), len(paths))
     digests, digest_errors = naming_digests(
         paths,
         config.pattern,
@@ -150,6 +162,7 @@ def _plan_tree(
         manifest=manifest,
         workers=options.workers,
         full=options.full,
+        monitor=monitor,
     )
 
     for family in families:

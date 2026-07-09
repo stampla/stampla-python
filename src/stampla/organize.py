@@ -27,13 +27,18 @@ from pathlib import Path
 from stampla.config import Config
 from stampla.dates import NAME_TIMESTAMP_TAG
 from stampla.importer import ImportPlan, build_plan
+from stampla.progress import Monitor
 from stampla.report import Bucket, Finding, Report
 
 MTIME_TAG = "File:FileModifyDate"
 
 
 def run_organize(
-    config: Config, root: Path, path: Path, workers: int | None = None
+    config: Config,
+    root: Path,
+    path: Path,
+    workers: int | None = None,
+    monitor: Monitor | None = None,
 ) -> tuple[Report, ImportPlan]:
     """Plan the messy tree as import would, then annotate for triage."""
     fallback_config = replace(
@@ -41,7 +46,7 @@ def run_organize(
         date_chain_photo=(*config.date_chain_photo, NAME_TIMESTAMP_TAG, MTIME_TAG),
         date_chain_video=(*config.date_chain_video, NAME_TIMESTAMP_TAG, MTIME_TAG),
     )
-    plan = build_plan(fallback_config, root, path, workers=workers)
+    plan = build_plan(fallback_config, root, path, workers=workers, monitor=monitor)
     report = plan.report
 
     for master, source in sorted(plan.date_sources.items()):

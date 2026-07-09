@@ -27,6 +27,7 @@ from stampla.exiftool import ExifTool
 from stampla.family import Family, group_by_prefix
 from stampla.manifest import Manifest
 from stampla.pattern import NamingPattern
+from stampla.progress import Monitor
 from stampla.report import Bucket, Finding, Report
 from stampla.scan import FileStatus, ScannedFile, scan_tree
 
@@ -44,15 +45,17 @@ def run_verify(
     root: Path,
     paths: Sequence[Path] = (),
     options: VerifyOptions | None = None,
+    monitor: Monitor | None = None,
 ) -> Report:
     """Verify the configured trees (or the given subpaths) under ``root``."""
     options = options or VerifyOptions()
+    monitor = monitor or Monitor()
     # --skip-hash still loads the manifest: it caches dates, not just digests
     manifest = Manifest.load(root.resolve()) if options.use_manifest else None
     report = Report()
     with ExifTool(workers=options.workers) as tool:
         for tree, scan_root in _targets(config, root, paths):
-            report.merge(_verify_tree(tool, tree, scan_root, config, options, manifest))
+            report.merge(_verify_tree(tool, tree, scan_root, config, options, manifest, monitor))
     if manifest is not None:
         if manifest.stale_trusted:
             report.hints.append(
@@ -61,6 +64,17 @@ def run_verify(
             )
         manifest.save()
     return report
+
+
+def _scan_with_monitor(scan_root: Path, config: Config, monitor: Monitor) -> list[ScannedFile]:
+    """Scan a tree, reporting motion (the total is unknown until done)."""
+    files: list[ScannedFile] = []
+    for file in scan_tree(scan_root, config.grammar, config.excludes):
+        files.append(file)
+        if len(files) % 512 == 0:
+            monitor.step("scan", len(files), 0, file.path)
+    monitor.step("scan", len(files), 0)
+    return files
 
 
 def _targets(config: Config, root: Path, paths: Sequence[Path]) -> list[tuple[Tree, Path]]:
@@ -92,9 +106,11 @@ def _verify_tree(
     config: Config,
     options: VerifyOptions,
     manifest: Manifest | None = None,
+    monitor: Monitor | None = None,
 ) -> Report:
+    monitor = monitor or Monitor()
     report = Report()
-    files = list(scan_tree(scan_root, config.grammar, config.excludes))
+    files = _scan_with_monitor(scan_root, config, monitor)
     report.scanned = len(files)
 
     for file in files:
@@ -124,9 +140,12 @@ def _verify_tree(
         for family in families
         for candidate in family.master_candidates(master_extensions)
     ]
+    # date resolution is one ExifTool batch: coarse events around it
+    monitor.step("dates", 0, len(candidates))
     dates = resolve_dates(
         candidates, chain, config.tzinfo, tool, manifest=manifest, full=options.full
     )
+    monitor.step("dates", len(candidates), len(candidates))
     digests: dict[Path, str] = {}
     hash_errors: dict[Path, str] = {}
     if not options.skip_hash and candidates:
@@ -137,6 +156,7 @@ def _verify_tree(
             manifest=manifest,
             workers=options.workers,
             full=options.full,
+            monitor=monitor,
         )
 
     derived_owners: dict[str, list[Path]] = defaultdict(list)

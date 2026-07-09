@@ -40,6 +40,7 @@ from stampla.digests import naming_digests
 from stampla.exiftool import ExifTool
 from stampla.family import group_by_prefix
 from stampla.manifest import Manifest
+from stampla.progress import Monitor
 from stampla.report import Bucket, Finding, Report
 from stampla.scan import scan_tree
 
@@ -56,10 +57,15 @@ class InjectOptions:
 
 
 def run_inject(
-    config: Config, root: Path, paths: tuple[Path, ...] = (), options: InjectOptions | None = None
+    config: Config,
+    root: Path,
+    paths: tuple[Path, ...] = (),
+    options: InjectOptions | None = None,
+    monitor: Monitor | None = None,
 ) -> Report:
     """Write computed names into the DAM token of stale-named masters."""
     options = options or InjectOptions()
+    monitor = monitor or Monitor()
     if config.dam is None or not config.dam.trees:
         raise ValueError("no [dam] trees configured; nothing to inject into")
     report = Report()
@@ -81,7 +87,7 @@ def run_inject(
             else:
                 scoped = [scan_root]
             for target_root in scoped:
-                _inject_tree(tool, tree, target_root, config, options, report, manifest)
+                _inject_tree(tool, tree, target_root, config, options, report, manifest, monitor)
     if paths:
         unmatched = [p for p in paths if p.resolve() not in matched]
         if unmatched:
@@ -101,8 +107,10 @@ def _inject_tree(
     options: InjectOptions,
     report: Report,
     manifest: Manifest | None,
+    monitor: Monitor,
 ) -> None:
     files = list(scan_tree(scan_root, config.grammar, config.excludes))
+    monitor.step("scan", len(files), 0)
     report.scanned += len(files)
     families = group_by_prefix(files)
     report.families += len(families)
@@ -118,8 +126,10 @@ def _inject_tree(
     assert config.dam is not None
     token_tag = config.dam.token_tag.partition(":")[2] or config.dam.token_tag
     tags = sorted(chain_tags(chain) | {token_tag})
+    monitor.step("dates", 0, len(masters))
     metadata = tool.read_metadata(masters, tags) if masters else {}
     augment_with_name_timestamps(metadata, masters)
+    monitor.step("dates", len(masters), len(masters))
     digests, digest_errors = naming_digests(
         masters,
         config.pattern,
@@ -127,8 +137,10 @@ def _inject_tree(
         manifest=manifest,
         workers=options.workers,
         full=options.full,
+        monitor=monitor,
     )
 
+    written_count = 0
     for family in families:
         master = family.master(master_extensions)
         if master is None:
@@ -194,6 +206,8 @@ def _inject_tree(
                 )
             )
             continue
+        written_count += 1
+        monitor.step("tokens", written_count, 0, target)
         tool.execute("-overwrite_original", f"-{config.dam.token_tag}={derived}", str(target))
         written = tool.read_metadata([target], [token_tag])
         stored = next(

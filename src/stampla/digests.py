@@ -19,6 +19,7 @@ from stampla.exiftool import ExifTool
 from stampla.hashing import hash_files
 from stampla.manifest import Manifest, ManifestError
 from stampla.pattern import NamingPattern
+from stampla.progress import Monitor
 
 
 def naming_digests(
@@ -28,12 +29,14 @@ def naming_digests(
     manifest: Manifest | None = None,
     workers: int | None = None,
     full: bool = False,
+    monitor: Monitor | None = None,
 ) -> tuple[dict[Path, str], dict[Path, str]]:
     """Compute each master's naming digest under ``pattern``.
 
     Returns ``(digests, errors)`` — full hexdigests keyed by path, and
     per-path error messages for files that could not be hashed.
     """
+    monitor = monitor or Monitor()
     file_sourced = [p for p in paths if pattern.digest_source_for(_ext(p)) == "file"]
     image_sourced = [p for p in paths if pattern.digest_source_for(_ext(p)) == "image"]
 
@@ -42,7 +45,7 @@ def naming_digests(
 
     to_hash = _through_manifest(file_sourced, pattern.digest, manifest, full, digests)
     if to_hash:
-        fresh, hash_errors = hash_files(to_hash, [pattern.digest], workers=workers)
+        fresh, hash_errors = hash_files(to_hash, [pattern.digest], workers=workers, monitor=monitor)
         errors.update(hash_errors)
         for path, result in fresh.items():
             digests[path] = result[pattern.digest]
@@ -51,7 +54,10 @@ def naming_digests(
     image_key = f"{pattern.digest}-image"
     to_hash = _through_manifest(image_sourced, image_key, manifest, full, digests)
     if to_hash:
+        # image hashes come back as one ExifTool batch: coarse events
+        monitor.step("hash", 0, len(to_hash))
         fresh_hashes = tool.read_image_hashes(to_hash, pattern.digest)
+        monitor.step("hash", len(to_hash), len(to_hash))
         for path in to_hash:
             value = fresh_hashes.get(path)
             if value is None:

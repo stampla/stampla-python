@@ -5,6 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from stampla import __version__
@@ -15,6 +18,7 @@ from stampla.exiftool import ExifToolError
 from stampla.importer import ImportVerdict, apply_import, build_plan, verdict_of
 from stampla.journal import FamilyMove, Journal, list_journals
 from stampla.organize import run_organize
+from stampla.progress import Monitor, ProgressEvent
 from stampla.renamer import RenameOptions, run_rename
 from stampla.report import Bucket, Finding, Report
 from stampla.verify import VerifyOptions, run_verify
@@ -147,6 +151,42 @@ def main(argv: list[str] | None = None) -> int:
     except (ConfigError, ExifToolError, ValueError, OSError) as error:
         print(f"stampla: {error}", file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        print(
+            "\nstampla: interrupted — a journaled apply can be finished"
+            " with the resume command or reverted with undo",
+            file=sys.stderr,
+        )
+        return 130
+
+
+@contextmanager
+def _progress() -> Iterator[Monitor]:
+    """A live, throttled progress line on stderr when it is a terminal."""
+    if not sys.stderr.isatty():
+        yield Monitor()
+        return
+    last = 0.0
+
+    def render(event: ProgressEvent) -> None:
+        nonlocal last
+        now = time.monotonic()
+        if now - last < 0.1 and event.done != event.total:
+            return  # a fast phase would otherwise repaint thousands of times
+        last = now
+        total = f"/{event.total}" if event.total else ""
+        name = f"  {event.path.name}" if event.path is not None else ""
+        print(
+            f"\r\x1b[2K  {event.phase}: {event.done}{total}{name}",
+            end="",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    try:
+        yield Monitor(callback=render)
+    finally:
+        print("\r\x1b[2K", end="", file=sys.stderr, flush=True)
 
 
 def _emit(
@@ -239,7 +279,8 @@ def _run_undo_command(args: argparse.Namespace) -> int:
         return 0
     journal = Journal.load(journal_path)
     _print_journal_header("undo", journal)
-    result = undo_journal(journal)
+    with _progress() as monitor:
+        result = undo_journal(journal, monitor=monitor)
     report = _journal_result_report(result)
     _emit(
         args,
@@ -261,7 +302,8 @@ def _run_resume_command(args: argparse.Namespace) -> int:
 
     journal = Journal.load(args.journal)
     _print_journal_header("resume", journal)
-    result = apply_plan(journal)
+    with _progress() as monitor:
+        result = apply_plan(journal, monitor=monitor)
     report = _journal_result_report(result)
     _emit(
         args,
@@ -288,8 +330,9 @@ def _print_journal_header(action: str, journal: Journal) -> None:
 
 def _run_import_command(args: argparse.Namespace) -> int:
     config, root = _config_and_root(args)
-    plan = build_plan(config, root.resolve(), args.card, workers=args.workers)
-    report = apply_import(plan, root.resolve()) if args.apply else plan.report
+    with _progress() as monitor:
+        plan = build_plan(config, root.resolve(), args.card, workers=args.workers, monitor=monitor)
+        report = apply_import(plan, root.resolve(), monitor=monitor) if args.apply else plan.report
     verdict = verdict_of(report, applied=args.apply)
 
     extra: list[str] = []
@@ -317,7 +360,10 @@ def _run_import_command(args: argparse.Namespace) -> int:
 
 def _run_organize_command(args: argparse.Namespace) -> int:
     config, root = _config_and_root(args)
-    report, plan = run_organize(config, root.resolve(), args.path, workers=args.workers)
+    with _progress() as monitor:
+        report, plan = run_organize(
+            config, root.resolve(), args.path, workers=args.workers, monitor=monitor
+        )
     _emit(
         args,
         "organize",
@@ -340,7 +386,8 @@ def _run_rename_command(args: argparse.Namespace) -> int:
         full=args.full,
         use_manifest=not args.no_manifest,
     )
-    report, moves = run_rename(config, root.resolve(), tuple(args.paths), options)
+    with _progress() as monitor:
+        report, moves = run_rename(config, root.resolve(), tuple(args.paths), options, monitor)
     extra: list[str] = []
     if not args.apply and moves:
         total = sum(len(m.renames) for m in moves)
@@ -357,7 +404,8 @@ def _run_inject_command(args: argparse.Namespace) -> int:
         full=args.full,
         use_manifest=not args.no_manifest,
     )
-    report = run_inject(config, root.resolve(), tuple(args.paths), options)
+    with _progress() as monitor:
+        report = run_inject(config, root.resolve(), tuple(args.paths), options, monitor)
     extra: list[str] = []
     written = sum(1 for f in report.findings if f.bucket is Bucket.TOKEN_WRITTEN)
     pending = sum(1 for f in report.findings if f.bucket is Bucket.TOKEN_PENDING)
@@ -389,6 +437,7 @@ def _run_verify_command(args: argparse.Namespace) -> int:
         full=args.full,
         use_manifest=not args.no_manifest,
     )
-    report = run_verify(config, root, args.paths, options)
+    with _progress() as monitor:
+        report = run_verify(config, root, args.paths, options, monitor)
     _emit(args, "verify", report)
     return 1 if report.has_problems else 0

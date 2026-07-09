@@ -157,6 +157,10 @@ progress. See [CHANGELOG.md](CHANGELOG.md).
 
 Safety first: every command is a dry run unless explicitly applied, and a
 file whose capture time cannot be resolved is reported, never renamed.
+Long runs show a live progress line on the terminal, and interrupting
+one (Ctrl-C) is safe: planning stops cleanly, and an interrupted apply
+is the journal's own case — finish it with `resume` or revert it with
+`undo`.
 Applies are validated as a whole before anything is touched, guarded by a
 per-archive lock, journaled to `~/.stampla/journals/` before the first
 change, applied atomically per file family, finishable after interruption

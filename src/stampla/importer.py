@@ -34,6 +34,7 @@ from stampla.exiftool import ExifTool
 from stampla.family import OriginalGroup, group_originals
 from stampla.hashing import compute_digests, hash_files
 from stampla.journal import FamilyMove, Journal, Rename
+from stampla.progress import Monitor
 from stampla.report import Bucket, Finding, Report
 
 
@@ -77,15 +78,24 @@ def verdict_of(report: Report, applied: bool) -> ImportVerdict | None:
     )
 
 
-def build_plan(config: Config, root: Path, card: Path, workers: int | None = None) -> ImportPlan:
+def build_plan(
+    config: Config,
+    root: Path,
+    card: Path,
+    workers: int | None = None,
+    monitor: Monitor | None = None,
+) -> ImportPlan:
     """Work out every copy the card calls for, without touching anything."""
     if not card.is_dir():
         raise ValueError(f"card path is not a directory: {card}")
+    monitor = monitor or Monitor()
     plan = ImportPlan(algorithm=config.pattern.digest)
     report = plan.report
 
     files: list[Path] = []
-    for path in sorted(card.rglob("*")):
+    for scanned, path in enumerate(sorted(card.rglob("*"))):
+        if scanned % 512 == 0:
+            monitor.step("scan", scanned, 0, path)
         if not path.is_file():
             continue
         relative = path.relative_to(card)
@@ -126,10 +136,14 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
     master_paths = sorted(masters.values())
     tags = sorted(chain_tags(config.date_chain_photo + config.date_chain_video))
     with ExifTool(workers=workers) as tool:
+        monitor.step("dates", 0, len(master_paths))
         metadata = tool.read_metadata(master_paths, tags) if master_paths else {}
         augment_with_name_timestamps(metadata, master_paths)
-        naming, naming_errors = naming_digests(master_paths, config.pattern, tool, workers=workers)
-    digests, hash_errors = hash_files(files, [plan.algorithm], workers=workers)
+        monitor.step("dates", len(master_paths), len(master_paths))
+        naming, naming_errors = naming_digests(
+            master_paths, config.pattern, tool, workers=workers, monitor=monitor
+        )
+    digests, hash_errors = hash_files(files, [plan.algorithm], workers=workers, monitor=monitor)
 
     moves: list[FamilyMove] = []
     for group in groups:
@@ -215,8 +229,14 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
     return plan
 
 
-def apply_import(plan: ImportPlan, root: Path, journal_dir: Path | None = None) -> Report:
+def apply_import(
+    plan: ImportPlan,
+    root: Path,
+    journal_dir: Path | None = None,
+    monitor: Monitor | None = None,
+) -> Report:
     """Copy a built plan into the archive and verify the copies."""
+    monitor = monitor or Monitor()
     report = plan.report
     if not plan.moves:
         return report
@@ -228,7 +248,7 @@ def apply_import(plan: ImportPlan, root: Path, journal_dir: Path | None = None) 
         root, plan.moves, directory=journal_dir, kind="copy", algorithm=plan.algorithm
     )
     print(f"journal: {journal.path}", file=sys.stderr)
-    result = apply_plan(journal)
+    result = apply_plan(journal, monitor=monitor)
     for key, error in result.failed:
         report.ok -= 1
         report.add(Finding(Bucket.APPLY_FAILED, Path(key), f"import failed: {error}"))
@@ -239,7 +259,8 @@ def apply_import(plan: ImportPlan, root: Path, journal_dir: Path | None = None) 
         if move.key in {key for key, _ in result.failed}
         for rename in move.renames
     }
-    for target, expected in sorted(plan.expected.items()):
+    for index, (target, expected) in enumerate(sorted(plan.expected.items())):
+        monitor.step("verify-copies", index, len(plan.expected), target)
         if target in failed_targets:
             continue  # its group failed above, already reported
         if not target.is_file():
@@ -261,6 +282,7 @@ def apply_import(plan: ImportPlan, root: Path, journal_dir: Path | None = None) 
                     " — do not format the card",
                 )
             )
+    monitor.emit("verify-copies", len(plan.expected), len(plan.expected))
     return report
 
 
