@@ -416,7 +416,7 @@ class TestJournal:
         assert ours[0].status == "complete"  # an empty plan has nothing left to do
 
 
-class TestJournalsCli:
+class TestHistoryCli:
     def test_lists_runs_with_status(
         self, root: Path, journal_dir: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -425,14 +425,14 @@ class TestJournalsCli:
         journal = Journal.create(root, (move,), directory=journal_dir, command="rename")
         assert apply_plan(journal).ok
 
-        assert main(["journals"]) == 0
+        assert main(["history"]) == 0
         out = capsys.readouterr().out
         assert "rename" in out
         assert "complete" in out
 
-        assert main(["journals", "--json"]) == 0
+        assert main(["history", "--json"]) == 0
         payload = json.loads(capsys.readouterr().out)
-        entry = payload["journals"][0]
+        entry = payload["history"][0]
         assert entry["command"] == "rename"
         assert entry["status"] == "complete"
         assert entry["families"] == 1
@@ -445,12 +445,12 @@ class TestJournalsCli:
         Journal.create(root, (), directory=journal_dir, command="rename")
         Journal.create(other, (), directory=journal_dir, command="import", kind="copy")
 
-        assert main(["journals", "--root", str(other), "--json"]) == 0
+        assert main(["history", "--root", str(other), "--json"]) == 0
         payload = json.loads(capsys.readouterr().out)
-        assert [j["command"] for j in payload["journals"]] == ["import"]
+        assert [j["command"] for j in payload["history"]] == ["import"]
 
     def test_empty_history_says_so(self, capsys: pytest.CaptureFixture[str]) -> None:
-        assert main(["journals"]) == 0
+        assert main(["history"]) == 0
         assert "no journals" in capsys.readouterr().out
 
 

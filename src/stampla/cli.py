@@ -123,15 +123,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     organize.add_argument("path", type=Path, help="messy directory to analyze")
 
-    journals = subparsers.add_parser(
-        "journals",
+    history = subparsers.add_parser(
+        "history",
         help="list journaled apply runs with their status",
     )
-    journals.add_argument("--config", type=Path, help="TOML configuration file")
-    journals.add_argument(
-        "--root", type=Path, help="only journals for this archive root (overrides the config)"
+    history.add_argument("--config", type=Path, help="TOML configuration file")
+    history.add_argument(
+        "--root", type=Path, help="only runs against this archive root (overrides the config)"
     )
-    journals.add_argument("--json", action="store_true", help="machine-readable output")
+    history.add_argument("--json", action="store_true", help="machine-readable output")
 
     undo = subparsers.add_parser(
         "undo",
@@ -167,8 +167,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     try:
-        if args.command == "journals":
-            return _run_journals_command(args)
+        if args.command == "history":
+            return _run_history_command(args)
         if args.command == "undo":
             return _run_undo_command(args)
         if args.command == "resume":
@@ -338,7 +338,7 @@ def _journal_result_report(result: object) -> Report:
     return report
 
 
-def _run_journals_command(args: argparse.Namespace) -> int:
+def _run_history_command(args: argparse.Namespace) -> int:
     root: Path | None = None
     if args.root is not None:
         root = args.root
@@ -349,8 +349,8 @@ def _run_journals_command(args: argparse.Namespace) -> int:
     if args.json:
         payload = {
             "format": 1,
-            "command": "journals",
-            "journals": [
+            "command": "history",
+            "history": [
                 {
                     "path": str(s.path),
                     "root": str(s.root),

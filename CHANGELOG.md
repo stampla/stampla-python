@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-family progress and can be cancelled at safe points; the CLI shows
   a live progress line on a terminal, and Ctrl-C exits cleanly with a
   pointer to `resume`.
-- `journals` — list every journaled apply run with its originating
+- `history` — list every journaled apply run with its originating
   command and status (pending, partial, complete, undone), optionally
   narrowed to one archive; journals record their provenance.
 - Selective import: directories after the card path narrow the run to

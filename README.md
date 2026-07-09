@@ -174,7 +174,7 @@ per-archive lock, journaled to `~/.stampla/journals/` before the first
 change, applied atomically per file family, finishable after interruption
 with `stampla resume`, and revertable with `stampla undo` — which,
 for imported copies, re-verifies each file's digest and refuses to delete
-anything edited since. `stampla journals` lists every recorded run
+anything edited since. `stampla history` lists every recorded run
 with its originating command and status (pending, partial, complete,
 undone), optionally narrowed to one archive with `--config`/`--root`.
 Nothing is ever overwritten. Exit codes everywhere:
