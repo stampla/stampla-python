@@ -33,3 +33,7 @@ All four must pass; coverage is gated at 90%.
   changing anything. Treat a change that would weaken one as a design
   discussion, not a patch.
 - Conventional Commits (`feat:`, `fix:`, `docs:`, `ci:`, `chore:`).
+- Naming: Stampla in prose; `stampla` for the command, the
+  package and all identifiers — never two words.
+- README links must be absolute URLs: PyPI renders the README without
+  rewriting relative links.
