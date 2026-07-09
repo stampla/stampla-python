@@ -120,6 +120,18 @@ class TestVerifyEndToEnd:
         by_name = buckets_of(payload)
         assert by_name[renamed.name] == "date-mismatch"
         assert by_name[corrupted.name] == "corruption"
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        by_path = {Path(str(f["path"])).name: f for f in findings}
+        mismatch_data = by_path[renamed.name]["data"]
+        assert mismatch_data["name_datetime"] == "20260106_110000"
+        assert mismatch_data["metadata_datetime"] == "20260106_100000"
+        assert "DateTimeOriginal" in str(mismatch_data["source"])
+        corruption_data = by_path[corrupted.name]["data"]
+        assert corruption_data["name_digest"] == "deadbeef"
+        assert str(by_path[corrupted.name]["detail"]).endswith(
+            str(corruption_data["content_digest"])
+        )
         assert by_name[undated.name] == "unresolved-date"
         assert by_name["DSC_1234.jpg"] == "unnamed"
         assert by_name["20260109_070000_0badc0de(1).jpg"] == "malformed"

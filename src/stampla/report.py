@@ -2,7 +2,11 @@
 
 Everything verify (and later, organize) discovers lands in one of a fixed
 set of buckets, so reports stay comparable between runs. A finding is
-never a guess: each carries the evidence in its detail line.
+never a guess: each carries the evidence in its detail line, and where
+that evidence contains values a consumer would otherwise have to parse
+back out of the prose (expected vs. actual timestamps, digests, the tag
+that dated a file), the same values ride along machine-readably in
+``data``.
 
 Every bucket has a severity, so a consumer never has to re-derive what a
 bucket *means*:
@@ -20,6 +24,7 @@ exactly the buckets whose severity is ``safe``.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -124,6 +129,9 @@ class Finding:
     path: Path
     detail: str = ""
     related: tuple[Path, ...] = ()
+    #: the detail's values, machine-readable; only set where the prose
+    #: carries data worth consuming (never information of its own)
+    data: Mapping[str, object] | None = None
 
 
 @dataclass
@@ -175,6 +183,7 @@ class Report:
                     "path": str(finding.path),
                     "detail": finding.detail,
                     "related": [str(path) for path in finding.related],
+                    **({"data": dict(finding.data)} if finding.data else {}),
                 }
                 for finding in self.findings
             ],

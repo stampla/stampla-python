@@ -84,6 +84,7 @@ def run_rename(
                         Bucket.RENAME_PENDING,
                         rename.old,
                         f"would become {rename.new.name}",
+                        data={"new_name": rename.new.name},
                     )
                 )
         return report, tuple(moves)
@@ -101,7 +102,14 @@ def run_rename(
         for move in moves:
             if move.key in applied:
                 for rename in move.renames:
-                    report.add(Finding(Bucket.RENAMED, rename.old, f"now {rename.new.name}"))
+                    report.add(
+                        Finding(
+                            Bucket.RENAMED,
+                            rename.old,
+                            f"now {rename.new.name}",
+                            data={"new_name": rename.new.name},
+                        )
+                    )
     return report, tuple(moves)
 
 

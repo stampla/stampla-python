@@ -179,10 +179,18 @@ def _inject_tree(
             continue
 
         assert config.dam is not None
+        token_data = {
+            "token": derived,
+            "target": target.name,
+            "embedded": extension in EMBEDDED_TOKEN_EXTENSIONS,
+        }
         if not options.apply:
             report.add(
                 Finding(
-                    Bucket.TOKEN_PENDING, path, f"would write {derived} into {target.name}{note}"
+                    Bucket.TOKEN_PENDING,
+                    path,
+                    f"would write {derived} into {target.name}{note}",
+                    data=token_data,
                 )
             )
             continue
@@ -206,7 +214,12 @@ def _inject_tree(
             )
             continue
         report.add(
-            Finding(Bucket.TOKEN_WRITTEN, path, f"{derived} written into {target.name}{note}")
+            Finding(
+                Bucket.TOKEN_WRITTEN,
+                path,
+                f"{derived} written into {target.name}{note}",
+                data=token_data,
+            )
         )
 
 

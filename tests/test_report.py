@@ -72,6 +72,14 @@ class TestJson:
         assert payload["findings"][0]["severity"] == "alarm"
         assert payload["findings"][1]["severity"] == "attention"
 
+    def test_data_appears_only_when_set(self) -> None:
+        report = Report()
+        report.add(Finding(Bucket.DATE_MISMATCH, Path("a/x.nef"), data={"source": "EXIF"}))
+        report.add(Finding(Bucket.UNNAMED, Path("a/y.nef")))
+        findings = json.loads(report.to_json())["findings"]
+        assert findings[0]["data"] == {"source": "EXIF"}
+        assert "data" not in findings[1]
+
 
 class TestMerge:
     def test_merge_accumulates(self) -> None:

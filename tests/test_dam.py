@@ -99,6 +99,10 @@ class TestInject:
         assert code == 0
         findings = findings_of(payload)
         assert findings[0]["bucket"] == "token-pending"
+        data = findings[0]["data"]
+        assert isinstance(data, dict)
+        assert data["embedded"] is True
+        assert str(data["token"]) in str(findings[0]["detail"])
         assert read_token(stale) is None
 
     def test_apply_writes_token_into_embedded_master(self, archive: Path) -> None:

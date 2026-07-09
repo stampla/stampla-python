@@ -129,6 +129,9 @@ class TestRenameEndToEnd:
         pending = [f for f in findings_of(payload) if f["bucket"] == "rename-pending"]
         assert len(pending) == 5
         assert stale.exists()
+        data = pending[0]["data"]
+        assert isinstance(data, dict)
+        assert str(data["new_name"]) in str(pending[0]["detail"])
 
     def test_clean_archive_plans_nothing(self, tmp_path: Path) -> None:
         write_config(tmp_path)

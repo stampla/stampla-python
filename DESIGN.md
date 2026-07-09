@@ -192,6 +192,12 @@ or `safe` — so a consumer (a script reading `--json`, a front end) never
 re-derives what a bucket means. The exit-code rule is stated once in
 terms of it: findings with severity `safe` never fail a command.
 
+Where a finding's detail line contains values (expected vs. actual
+timestamps or digests, the metadata tag that dated a file, a pending
+token), the same values ride along in a machine-readable `data` object
+in `--json` output — the prose is for people, never the only carrier of
+evidence.
+
 Only the master of each family is hashed and dated — sidecars and
 derivatives inherit the master's prefix by definition, so their names are
 right exactly when their master's is. Ambiguous families (a RAW plus a

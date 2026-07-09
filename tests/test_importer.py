@@ -237,6 +237,7 @@ class TestImportPolicies:
         findings = payload["findings"]
         assert isinstance(findings, list)
         assert [f["bucket"] for f in findings] == ["ignored"]
+        assert findings[0]["data"] == {"reason": "jpeg-twin"}
         month = archive / "Photos" / "2026" / "2026-07"
         assert len(list(month.glob("*.nef"))) == 1
         assert list(month.glob("*.jpg")) == []

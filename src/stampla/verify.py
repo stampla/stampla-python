@@ -167,6 +167,7 @@ def _verify_tree(
                         f"derives {derived_prefix}, same as "
                         + ", ".join(str(o) for o in owners if o != owner),
                         related=tuple(o for o in owners if o != owner),
+                        data={"prefix": derived_prefix},
                     )
                 )
     return report
@@ -227,13 +228,18 @@ def _classify_family(
     actual_prefix = family.prefix
     named_pattern = master.parsed.pattern if master.parsed else pattern
     if named_pattern.datetime_of(actual_prefix) != resolved.value:
+        name_datetime = actual_prefix[: named_pattern.datetime_length]
         derived_datetime = resolved.value.strftime(named_pattern.datetime_format)
         report.add(
             Finding(
                 Bucket.DATE_MISMATCH,
                 path,
-                f"name says {actual_prefix[: named_pattern.datetime_length]},"
-                f" metadata says {derived_datetime} ({resolved.source})",
+                f"name says {name_datetime}, metadata says {derived_datetime} ({resolved.source})",
+                data={
+                    "name_datetime": name_datetime,
+                    "metadata_datetime": derived_datetime,
+                    "source": resolved.source,
+                },
             )
         )
         return None
@@ -265,22 +271,24 @@ def _classify_family(
                     path,
                     f"intact under pattern {alternative.name!r};"
                     f" pending migration to {pattern.name!r}",
+                    data={"pattern": alternative.name, "target_pattern": pattern.name},
                 )
             )
             return None
 
     ext = master.parsed.ext if master.parsed else path.suffix.lstrip(".").lower()
+    data: dict[str, object] = {"derived_prefix": derived_prefix}
     if pattern.digest_source_for(ext) == "image":
         bucket = Bucket.CORRUPTION
         meaning = "image data differs from the name"
     else:
         mutable = ext in config.mutable_extensions
         bucket = Bucket.EDIT_DRIFT if mutable else Bucket.CORRUPTION
-        meaning = (
-            f"name says {pattern.digest_of(actual_prefix)},"
-            f" content is {digest[: pattern.digest_length]}"
-        )
-    report.add(Finding(bucket, path, meaning))
+        name_digest = pattern.digest_of(actual_prefix)
+        content_digest = digest[: pattern.digest_length]
+        meaning = f"name says {name_digest}, content is {content_digest}"
+        data.update(name_digest=name_digest, content_digest=content_digest)
+    report.add(Finding(bucket, path, meaning, data=data))
     return (derived_prefix, path)
 
 

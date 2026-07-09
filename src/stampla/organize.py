@@ -78,6 +78,7 @@ def run_organize(
                         f"identical content as {len(masters) - 1} other group(s)"
                         f" here (all derive {prefix})",
                         related=tuple(m for m in masters if m != master),
+                        data={"prefix": prefix},
                     )
                 )
     return report, plan

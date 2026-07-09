@@ -61,10 +61,17 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
             continue
         relative = path.relative_to(card)
         if any(part.startswith(".") for part in relative.parts):
-            report.add(Finding(Bucket.IGNORED, path, "hidden path; not imported"))
+            report.add(Finding(Bucket.IGNORED, path, "hidden path; not imported", data=_HIDDEN))
             continue
         if _matches(relative, config.import_ignore):
-            report.add(Finding(Bucket.IGNORED, path, "matches an import ignore pattern"))
+            report.add(
+                Finding(
+                    Bucket.IGNORED,
+                    path,
+                    "matches an import ignore pattern",
+                    data=_IGNORE_PATTERN,
+                )
+            )
             continue
         files.append(path)
     report.scanned = len(files)
@@ -132,7 +139,14 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
             twins = tuple(m for m in members if _is_jpeg_twin(m, group.base))
             members = tuple(m for m in members if m not in twins)
             for twin in twins:
-                report.add(Finding(Bucket.IGNORED, twin, "JPEG twin of a RAW; skipped by policy"))
+                report.add(
+                    Finding(
+                        Bucket.IGNORED,
+                        twin,
+                        "JPEG twin of a RAW; skipped by policy",
+                        data=_JPEG_TWIN,
+                    )
+                )
         prefix = config.pattern.build_prefix(resolved.value, naming[master])
         destination = root / tree.path / _render_layout(tree.layout, resolved)
         trimmed = OriginalGroup(directory=group.directory, base=group.base, members=members)
@@ -155,6 +169,7 @@ def build_plan(config: Config, root: Path, card: Path, workers: int | None = Non
                         master,
                         f"identical content already in archive ({destination / prefix}*)",
                         related=tuple(m for m in members if m != master),
+                        data={"prefix": prefix, "destination": str(destination)},
                     )
                 )
             continue
@@ -218,6 +233,12 @@ def apply_import(plan: ImportPlan, root: Path, journal_dir: Path | None = None) 
                 )
             )
     return report
+
+
+#: why a file was ignored, machine-readably (Finding.data)
+_HIDDEN = {"reason": "hidden-path"}
+_IGNORE_PATTERN = {"reason": "ignore-pattern"}
+_JPEG_TWIN = {"reason": "jpeg-twin"}
 
 
 def _matches(relative: Path, patterns: tuple[str, ...]) -> bool:
