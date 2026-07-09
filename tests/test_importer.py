@@ -52,11 +52,23 @@ def archive(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def run_import(archive: Path, card: Path, *extra: str) -> tuple[int, dict[str, object]]:
+def run_import(
+    archive: Path, card: Path, *extra: str, paths: tuple[Path, ...] = ()
+) -> tuple[int, dict[str, object]]:
+    # selection paths go right after the card: argparse on Python 3.11
+    # cannot match a positional block that follows the options
     buffer = io.StringIO()
     with redirect_stdout(buffer):
         code = main(
-            ["import", str(card), "--config", str(archive / "config.toml"), "--json", *extra]
+            [
+                "import",
+                str(card),
+                *[str(path) for path in paths],
+                "--config",
+                str(archive / "config.toml"),
+                "--json",
+                *extra,
+            ]
         )
     return code, json.loads(buffer.getvalue())
 
@@ -142,7 +154,7 @@ class TestImportEndToEnd:
         make_card_photo(card / "batch-a", "DSC_0001", "2026:07:01 10:00:00")
         make_card_photo(card / "batch-b", "DSC_0002", "2026:07:02 10:00:00", b"b")
 
-        code, payload = run_import(archive, card, str(card / "batch-a"), "--apply")
+        code, payload = run_import(archive, card, "--apply", paths=(card / "batch-a",))
         assert code == 0, payload
         month = archive / "Photos" / "2026" / "2026-07"
         assert len(list(month.glob("20260701_*.jpg"))) == 1
