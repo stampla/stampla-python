@@ -17,6 +17,7 @@ skipped; they never abort the rest of the card.
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -66,9 +67,14 @@ class ImportVerdict:
     ignored: int
 
 
-def verdict_of(report: Report, applied: bool) -> ImportVerdict | None:
-    """The verdict of an applied import run; ``None`` for a dry run."""
-    if not applied:
+def verdict_of(report: Report, applied: bool, whole_card: bool = True) -> ImportVerdict | None:
+    """The verdict of an applied import run; ``None`` for a dry run.
+
+    A selective import (``only`` paths) also gets ``None``: the verdict
+    speaks for the whole card, and a run that never examined the whole
+    card must not clear it for formatting.
+    """
+    if not applied or not whole_card:
         return None
     return ImportVerdict(
         safe_to_format=not report.has_problems,
@@ -84,11 +90,19 @@ def build_plan(
     card: Path,
     workers: int | None = None,
     monitor: Monitor | None = None,
+    only: Sequence[Path] = (),
 ) -> ImportPlan:
-    """Work out every copy the card calls for, without touching anything."""
+    """Work out every copy the card calls for, without touching anything.
+
+    ``only`` narrows the plan to directories on the card (a triaged
+    batch out of organize, a selection in a front end); files outside
+    the selection are out of scope entirely — neither planned nor
+    reported.
+    """
     if not card.is_dir():
         raise ValueError(f"card path is not a directory: {card}")
     monitor = monitor or Monitor()
+    selection = _selection_roots(card, only)
     plan = ImportPlan(algorithm=config.pattern.digest)
     report = plan.report
 
@@ -97,6 +111,10 @@ def build_plan(
         if scanned % 512 == 0:
             monitor.step("scan", scanned, 0, path)
         if not path.is_file():
+            continue
+        if selection is not None and not any(
+            path.resolve().is_relative_to(chosen) for chosen in selection
+        ):
             continue
         relative = path.relative_to(card)
         if any(part.startswith(".") for part in relative.parts):
@@ -289,6 +307,21 @@ def apply_import(
             )
     monitor.emit("verify-copies", len(plan.expected), len(plan.expected))
     return report
+
+
+def _selection_roots(card: Path, only: Sequence[Path]) -> list[Path] | None:
+    """Resolved selection directories, or ``None`` for the whole card."""
+    if not only:
+        return None
+    selection: list[Path] = []
+    for path in only:
+        resolved = path.resolve()
+        if not resolved.is_relative_to(card.resolve()):
+            raise ValueError(f"path is outside the card: {path}")
+        if not resolved.is_dir():
+            raise ValueError(f"expected a directory on the card, got: {path}")
+        selection.append(resolved)
+    return selection
 
 
 #: why a file was ignored, machine-readably (Finding.data)

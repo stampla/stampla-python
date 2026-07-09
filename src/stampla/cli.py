@@ -79,6 +79,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="copy a memory card into the archive, named on arrival",
     )
     import_cmd.add_argument("card", type=Path, help="card or directory to import from")
+    import_cmd.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        help="limit the import to these directories on the card"
+        " (a selective run never clears the card for formatting)",
+    )
 
     inject = subparsers.add_parser(
         "inject",
@@ -378,14 +385,26 @@ def _print_journal_header(action: str, journal: Journal) -> None:
 def _run_import_command(args: argparse.Namespace) -> int:
     config, root = _config_and_root(args)
     with _progress() as monitor:
-        plan = build_plan(config, root.resolve(), args.card, workers=args.workers, monitor=monitor)
+        plan = build_plan(
+            config,
+            root.resolve(),
+            args.card,
+            workers=args.workers,
+            monitor=monitor,
+            only=tuple(args.paths),
+        )
         report = apply_import(plan, root.resolve(), monitor=monitor) if args.apply else plan.report
-    verdict = verdict_of(report, applied=args.apply)
+    verdict = verdict_of(report, applied=args.apply, whole_card=not args.paths)
 
     extra: list[str] = []
     if not args.apply and plan.moves:
         extra.append(
             f"\ndry run: {len(plan.moves)} group(s) would be imported; pass --apply to copy"
+        )
+    elif args.apply and args.paths and not report.has_problems:
+        extra.append(
+            "\nselection imported and verified; the rest of the card was not"
+            " examined — run a full import before formatting"
         )
     elif verdict is not None and verdict.safe_to_format:
         skipped = f", {verdict.ignored} file(s) ignored (listed above)" if verdict.ignored else ""

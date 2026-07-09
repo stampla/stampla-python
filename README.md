@@ -61,6 +61,12 @@ verdict is structural, not just an exit code: the envelope carries
 `verdict.safe_to_format` with the imported / already-imported /
 ignored counts.
 
+Directories after the card path narrow the import to just those
+batches (`stampla import /Volumes/CARD /Volumes/CARD/keepers`) —
+made for importing triaged groups out of `organize`. A selective run
+never clears the card for formatting: the verdict speaks for the whole
+card, and only a full import can issue it.
+
 ### verify
 
 Recompute every name from metadata and content, and report what disagrees:

@@ -137,6 +137,43 @@ class TestImportEndToEnd:
         assert findings[0]["bucket"] == "collision"
         assert "differs" in str(findings[0]["detail"])
 
+    def test_selection_imports_only_chosen_directories(self, archive: Path, tmp_path: Path) -> None:
+        card = tmp_path / "card"
+        make_card_photo(card / "batch-a", "DSC_0001", "2026:07:01 10:00:00")
+        make_card_photo(card / "batch-b", "DSC_0002", "2026:07:02 10:00:00", b"b")
+
+        code, payload = run_import(archive, card, str(card / "batch-a"), "--apply")
+        assert code == 0, payload
+        month = archive / "Photos" / "2026" / "2026-07"
+        assert len(list(month.glob("20260701_*.jpg"))) == 1
+        assert list(month.glob("20260702_*.jpg")) == []
+        # the unselected batch is out of scope entirely: not copied, not reported
+        summary = payload["summary"]
+        assert isinstance(summary, dict)
+        assert summary["scanned"] == 1
+        # and a selective run never clears the card for formatting
+        assert payload["verdict"] is None
+
+    def test_selection_outside_the_card_is_an_error(self, archive: Path, tmp_path: Path) -> None:
+        card = tmp_path / "card"
+        make_card_photo(card, "DSC_0001", "2026:07:01 10:00:00")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = main(
+                ["import", str(card), str(elsewhere), "--config", str(archive / "config.toml")]
+            )
+        assert code == 2
+
+    def test_selection_must_be_a_directory(self, archive: Path, tmp_path: Path) -> None:
+        card = tmp_path / "card"
+        photo = make_card_photo(card, "DSC_0001", "2026:07:01 10:00:00")
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = main(["import", str(card), str(photo), "--config", str(archive / "config.toml")])
+        assert code == 2
+
     def test_applied_import_with_problems_withholds_the_verdict(
         self, archive: Path, tmp_path: Path
     ) -> None:
