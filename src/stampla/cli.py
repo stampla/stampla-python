@@ -8,11 +8,11 @@ import sys
 from pathlib import Path
 
 from stampla import __version__
-from stampla.apply import undo_journal
+from stampla.apply import ApplyResult, undo_journal
 from stampla.config import Config, ConfigError, load_config
 from stampla.dam import InjectOptions, run_inject
 from stampla.exiftool import ExifToolError
-from stampla.importer import apply_import, build_plan
+from stampla.importer import ImportVerdict, apply_import, build_plan, verdict_of
 from stampla.journal import FamilyMove, Journal, list_journals
 from stampla.organize import run_organize
 from stampla.renamer import RenameOptions, run_rename
@@ -156,12 +156,17 @@ def _emit(
     plan: tuple[FamilyMove, ...] = (),
     applied: bool | None = None,
     text_extra: list[str] | None = None,
+    verdict: ImportVerdict | None = None,
+    result: ApplyResult | None = None,
 ) -> None:
     """One output shape for every command.
 
-    JSON envelope: ``{command, applied, plan, summary, findings}``;
-    ``applied`` is null for read-only commands. Text output prints the
-    plan (dry runs), the report, then any command-specific lines.
+    JSON envelope: ``{command, applied, plan, summary, findings, hints,
+    verdict, result}``; ``applied`` is null for read-only commands,
+    ``verdict`` is import's safe-to-format decision (null elsewhere and
+    on dry runs), ``result`` counts a journaled run's families (undo and
+    resume). Text output prints the plan (dry runs), the report, then
+    any command-specific lines.
     """
     if args.json:
         payload = json.loads(report.to_json())
@@ -174,6 +179,25 @@ def _emit(
             }
             for move in plan
         ]
+        payload["verdict"] = (
+            {
+                "safe_to_format": verdict.safe_to_format,
+                "imported": verdict.imported,
+                "already_imported": verdict.already_imported,
+                "ignored": verdict.ignored,
+            }
+            if verdict is not None
+            else None
+        )
+        payload["result"] = (
+            {
+                "applied": len(result.applied),
+                "skipped": len(result.skipped),
+                "failed": len(result.failed),
+            }
+            if result is not None
+            else None
+        )
         print(json.dumps(payload, indent=2, ensure_ascii=False))
         return
     if applied is False:
@@ -227,6 +251,7 @@ def _run_undo_command(args: argparse.Namespace) -> int:
             f"\nundo {journal_path.name}: {len(result.applied)} family(ies) reverted,"
             f" {len(result.skipped)} not applied, {len(result.failed)} failed"
         ],
+        result=result,
     )
     return 0 if result.ok else 1
 
@@ -248,6 +273,7 @@ def _run_resume_command(args: argparse.Namespace) -> int:
             f"\nresume {args.journal.name}: {len(result.applied)} family(ies) applied,"
             f" {len(result.skipped)} already done, {len(result.failed)} failed"
         ],
+        result=result,
     )
     return 0 if result.ok else 1
 
@@ -264,21 +290,28 @@ def _run_import_command(args: argparse.Namespace) -> int:
     config, root = _config_and_root(args)
     plan = build_plan(config, root.resolve(), args.card, workers=args.workers)
     report = apply_import(plan, root.resolve()) if args.apply else plan.report
+    verdict = verdict_of(report, applied=args.apply)
 
     extra: list[str] = []
     if not args.apply and plan.moves:
         extra.append(
             f"\ndry run: {len(plan.moves)} group(s) would be imported; pass --apply to copy"
         )
-    elif args.apply and not report.has_problems:
-        already = sum(1 for f in report.findings if f.bucket is Bucket.ALREADY_IMPORTED)
-        ignored = sum(1 for f in report.findings if f.bucket is Bucket.IGNORED)
-        skipped = f", {ignored} file(s) ignored (listed above)" if ignored else ""
+    elif verdict is not None and verdict.safe_to_format:
+        skipped = f", {verdict.ignored} file(s) ignored (listed above)" if verdict.ignored else ""
         extra.append(
-            f"\ncard fully accounted for: {report.ok} group(s) imported and verified,"
-            f" {already} already in the archive{skipped} — safe to format"
+            f"\ncard fully accounted for: {verdict.imported} group(s) imported and verified,"
+            f" {verdict.already_imported} already in the archive{skipped} — safe to format"
         )
-    _emit(args, "import", report, plan=plan.moves, applied=args.apply, text_extra=extra)
+    _emit(
+        args,
+        "import",
+        report,
+        plan=plan.moves,
+        applied=args.apply,
+        text_extra=extra,
+        verdict=verdict,
+    )
     return 1 if report.has_problems else 0
 
 

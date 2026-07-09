@@ -48,6 +48,35 @@ class ImportPlan:
     date_sources: dict[Path, str] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ImportVerdict:
+    """An applied import's bottom line: is the card fully accounted for?
+
+    ``safe_to_format`` is the README's promise made structural: every
+    card file was copied and verified, already sat in the archive
+    byte-identical, or is explicitly ignored. Anything else — an
+    unresolvable date, a same-name collision, a failed copy — makes it
+    false, exactly when the exit code reports a problem.
+    """
+
+    safe_to_format: bool
+    imported: int
+    already_imported: int
+    ignored: int
+
+
+def verdict_of(report: Report, applied: bool) -> ImportVerdict | None:
+    """The verdict of an applied import run; ``None`` for a dry run."""
+    if not applied:
+        return None
+    return ImportVerdict(
+        safe_to_format=not report.has_problems,
+        imported=report.ok,
+        already_imported=sum(1 for f in report.findings if f.bucket is Bucket.ALREADY_IMPORTED),
+        ignored=sum(1 for f in report.findings if f.bucket is Bucket.IGNORED),
+    )
+
+
 def build_plan(config: Config, root: Path, card: Path, workers: int | None = None) -> ImportPlan:
     """Work out every copy the card calls for, without touching anything."""
     if not card.is_dir():

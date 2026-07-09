@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -383,6 +384,20 @@ class TestUndoCli:
 
     def test_undo_missing_journal_is_an_error(self, tmp_path: Path) -> None:
         assert main(["undo", str(tmp_path / "missing.json")]) == 2
+
+    def test_undo_json_reports_result_counts(
+        self, root: Path, journal_dir: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        make_file(root, "a.nef")
+        moves = (family(root, "a", ("a.nef", "a2.nef")), family(root, "b", ("b.nef", "b2.nef")))
+        journal = Journal.create(root, moves, directory=journal_dir)
+        journal.mark_done("a")
+        (root / "a.nef").rename(root / "a2.nef")  # only family a was applied
+
+        assert main(["undo", str(journal.path), "--json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["result"] == {"applied": 1, "skipped": 1, "failed": 0}
+        assert payload["verdict"] is None
 
     def test_resume_finishes_interrupted_run(self, root: Path, journal_dir: Path) -> None:
         make_file(root, "a.nef")

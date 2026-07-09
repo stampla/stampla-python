@@ -71,6 +71,7 @@ class TestImportEndToEnd:
         assert isinstance(summary, dict)
         assert code == 0
         assert summary["ok"] == 1
+        assert payload["verdict"] is None  # a dry run never judges the card
         assert not (archive / "Photos").exists()
 
     def test_apply_copies_family_under_canonical_names(self, archive: Path, tmp_path: Path) -> None:
@@ -110,6 +111,12 @@ class TestImportEndToEnd:
         findings = payload["findings"]
         assert isinstance(findings, list)
         assert findings[0]["bucket"] == "already-imported"
+        assert payload["verdict"] == {
+            "safe_to_format": True,
+            "imported": 0,
+            "already_imported": 1,
+            "ignored": 0,
+        }
 
     def test_differing_archive_copy_is_a_collision(self, archive: Path, tmp_path: Path) -> None:
         card = tmp_path / "card"
@@ -129,6 +136,20 @@ class TestImportEndToEnd:
         assert isinstance(findings, list)
         assert findings[0]["bucket"] == "collision"
         assert "differs" in str(findings[0]["detail"])
+
+    def test_applied_import_with_problems_withholds_the_verdict(
+        self, archive: Path, tmp_path: Path
+    ) -> None:
+        card = tmp_path / "card"
+        card.mkdir()
+        (card / "NODATE.JPG").write_bytes(TINY_JPEG)  # no capture time anywhere
+
+        code, payload = run_import(archive, card, "--apply")
+        assert code == 1
+        verdict = payload["verdict"]
+        assert isinstance(verdict, dict)
+        assert verdict["safe_to_format"] is False
+        assert verdict["imported"] == 0
 
     def test_partially_imported_family_is_a_collision(self, archive: Path, tmp_path: Path) -> None:
         card = tmp_path / "card"

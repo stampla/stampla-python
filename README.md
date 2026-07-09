@@ -56,7 +56,10 @@ list once; anything you ignore by policy exists only on the card).
 Anything else (unresolvable capture time, a same-name file in the
 archive with *different* content, a family only partially present)
 exits 1 and blocks the "safe to format" verdict. Re-running `import`
-after an import is therefore the pre-format check.
+after an import is therefore the pre-format check. With `--json` the
+verdict is structural, not just an exit code: the envelope carries
+`verdict.safe_to_format` with the imported / already-imported /
+ignored counts.
 
 ### verify
 
