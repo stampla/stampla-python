@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Finding severities — every bucket is classified `alarm`, `attention`,
+  `expected` or `safe`; the exit-code rule is stated once in terms of
+  them, and JSON findings carry the severity.
+- Machine-readable finding data: where a detail line contains values
+  (expected vs. actual timestamps and digests, the dating tag, a pending
+  token, why a card file was ignored), the same values ride along in a
+  `data` object in JSON output.
+- Structural verdicts: import's safe-to-format decision, with imported /
+  already-imported / ignored counts, and undo/resume family counts are
+  part of the JSON envelope instead of text-only lines.
+- Progress and cancellation: long operations report per-file and
+  per-family progress and can be cancelled at safe points; the CLI shows
+  a live progress line on a terminal, and Ctrl-C exits cleanly with a
+  pointer to `resume`.
+- `journals` — list every journaled apply run with its originating
+  command and status (pending, partial, complete, undone), optionally
+  narrowed to one archive; journals record their provenance.
+- Selective import: directories after the card path narrow the run to
+  those batches; a selective run never issues the safe-to-format
+  verdict.
+- Versioned JSON envelope (`format: 1`): bucket counts nested under
+  `summary.buckets`, the archive root stated once with root-relative
+  paths beneath it.
+- `--json-stream` — NDJSON output: progress events while a command
+  runs, the result envelope as the final line.
+
 - `verify` — recompute every name from metadata and content; findings
   classified by meaning (corruption vs expected drift vs date mismatch vs
   pending migration), with a per-machine manifest so repeat runs only hash
