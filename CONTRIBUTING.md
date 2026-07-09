@@ -37,3 +37,16 @@ All four must pass; coverage is gated at 90%.
   package and all identifiers — never two words.
 - README links must be absolute URLs: PyPI renders the README without
   rewriting relative links.
+
+## Releasing
+
+Releases are deliberate and manual; automation takes over at the tag:
+
+1. Set `__version__` in `src/stampla/__init__.py`.
+2. Retitle the changelog's `[Unreleased]` section to `[X.Y.Z] - date`.
+3. Commit as `chore: release X.Y.Z`, tag `vX.Y.Z`, push both.
+
+The tag triggers `release.yml`: full checks, build, publish to PyPI via
+the trusted publisher, and a GitHub release whose notes are that
+version's changelog section — the changelog is the single source of
+release prose.
