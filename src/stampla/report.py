@@ -3,6 +3,18 @@
 Everything verify (and later, organize) discovers lands in one of a fixed
 set of buckets, so reports stay comparable between runs. A finding is
 never a guess: each carries the evidence in its detail line.
+
+Every bucket has a severity, so a consumer never has to re-derive what a
+bucket *means*:
+
+- ``alarm`` — data at risk or a change that failed; act now,
+- ``attention`` — something to review or fix,
+- ``expected`` — legitimate drift; worth knowing, still a finding,
+- ``safe`` — a fully accounted-for state; never fails a command.
+
+Text output orders alarms first, and the exit-code rule is encoded once
+here: :data:`SAFE_BUCKETS` (the findings that never fail a command) is
+exactly the buckets whose severity is ``safe``.
 """
 
 from __future__ import annotations
@@ -11,6 +23,13 @@ import json
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+
+
+class Severity(Enum):
+    ALARM = "alarm"
+    ATTENTION = "attention"
+    EXPECTED = "expected"
+    SAFE = "safe"
 
 
 class Bucket(Enum):
@@ -37,24 +56,43 @@ class Bucket(Enum):
     NAME_DATED = "name-dated"
     APPLY_FAILED = "apply-failed"
 
+    @property
+    def severity(self) -> Severity:
+        return _SEVERITIES[self]
+
+
+_SEVERITIES = {
+    Bucket.CORRUPTION: Severity.ALARM,
+    Bucket.APPLY_FAILED: Severity.ALARM,
+    Bucket.HASH_ERROR: Severity.ALARM,
+    Bucket.METADATA_UNREADABLE: Severity.ATTENTION,
+    Bucket.DATE_MISMATCH: Severity.ATTENTION,
+    Bucket.UNRESOLVED_DATE: Severity.ATTENTION,
+    Bucket.COLLISION: Severity.ATTENTION,
+    Bucket.AMBIGUOUS_MASTER: Severity.ATTENTION,
+    Bucket.ORPHAN_FAMILY: Severity.ATTENTION,
+    Bucket.NEEDS_SIDECAR: Severity.ATTENTION,
+    Bucket.OTHER_PATTERN: Severity.ATTENTION,
+    Bucket.MTIME_DATED: Severity.ATTENTION,
+    Bucket.MALFORMED: Severity.ATTENTION,
+    Bucket.UNNAMED: Severity.ATTENTION,
+    Bucket.EDIT_DRIFT: Severity.EXPECTED,
+    Bucket.NAME_DATED: Severity.SAFE,
+    Bucket.TOKEN_PENDING: Severity.SAFE,
+    Bucket.TOKEN_WRITTEN: Severity.SAFE,
+    Bucket.RENAME_PENDING: Severity.SAFE,
+    Bucket.RENAMED: Severity.SAFE,
+    Bucket.ALREADY_IMPORTED: Severity.SAFE,
+    Bucket.IGNORED: Severity.SAFE,
+}
 
 #: Findings that describe a safe, fully accounted-for state rather than a
 #: problem. They never fail a command's exit code.
-SAFE_BUCKETS = frozenset(
-    {
-        Bucket.ALREADY_IMPORTED,
-        Bucket.IGNORED,
-        Bucket.NAME_DATED,
-        Bucket.TOKEN_PENDING,
-        Bucket.TOKEN_WRITTEN,
-        Bucket.RENAME_PENDING,
-        Bucket.RENAMED,
-    }
-)
+SAFE_BUCKETS = frozenset(bucket for bucket in Bucket if bucket.severity is Severity.SAFE)
 
 
 #: Rendering order: alarms first, expected drift and inventory last.
-_BUCKET_ORDER = (
+BUCKET_ORDER = (
     Bucket.CORRUPTION,
     Bucket.APPLY_FAILED,
     Bucket.HASH_ERROR,
@@ -133,6 +171,7 @@ class Report:
             "findings": [
                 {
                     "bucket": finding.bucket.value,
+                    "severity": finding.bucket.severity.value,
                     "path": str(finding.path),
                     "detail": finding.detail,
                     "related": [str(path) for path in finding.related],
@@ -151,7 +190,7 @@ class Report:
         by_bucket: dict[Bucket, list[Finding]] = {}
         for finding in self.findings:
             by_bucket.setdefault(finding.bucket, []).append(finding)
-        for bucket in _BUCKET_ORDER:
+        for bucket in BUCKET_ORDER:
             group = by_bucket.get(bucket)
             if not group:
                 continue

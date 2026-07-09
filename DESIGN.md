@@ -187,6 +187,11 @@ disagreements:
 | `orphan-family` | sidecars whose master is gone |
 | `malformed` / `unnamed` | inventory of files outside the scheme |
 
+Every bucket also carries a severity — `alarm`, `attention`, `expected`
+or `safe` — so a consumer (a script reading `--json`, a front end) never
+re-derives what a bucket means. The exit-code rule is stated once in
+terms of it: findings with severity `safe` never fail a command.
+
 Only the master of each family is hashed and dated — sidecars and
 derivatives inherit the master's prefix by definition, so their names are
 right exactly when their master's is. Ambiguous families (a RAW plus a

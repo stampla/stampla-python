@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from stampla.report import Bucket, Finding, Report
+from stampla.report import BUCKET_ORDER, SAFE_BUCKETS, Bucket, Finding, Report, Severity
 
 
 def sample_report() -> Report:
@@ -41,6 +41,24 @@ class TestRenderText:
         assert not report.has_findings
 
 
+class TestSeverity:
+    def test_every_bucket_is_classified(self) -> None:
+        for bucket in Bucket:
+            assert isinstance(bucket.severity, Severity)
+
+    def test_safe_buckets_are_exactly_the_safe_severity(self) -> None:
+        assert frozenset(b for b in Bucket if b.severity is Severity.SAFE) == SAFE_BUCKETS
+
+    def test_expected_drift_still_counts_as_a_problem(self) -> None:
+        report = Report()
+        report.add(Finding(Bucket.EDIT_DRIFT, Path("a/x.dng")))
+        assert report.has_problems
+
+    def test_rendering_order_covers_every_bucket_once(self) -> None:
+        assert sorted(BUCKET_ORDER, key=lambda b: b.value) == sorted(Bucket, key=lambda b: b.value)
+        assert len(BUCKET_ORDER) == len(set(BUCKET_ORDER))
+
+
 class TestJson:
     def test_round_trips(self) -> None:
         payload = json.loads(sample_report().to_json())
@@ -48,6 +66,11 @@ class TestJson:
         assert payload["summary"]["corruption"] == 1
         # paths are rendered in the platform's native form
         assert payload["findings"][2]["related"] == [str(Path("a/z.nef"))]
+
+    def test_findings_carry_their_severity(self) -> None:
+        payload = json.loads(sample_report().to_json())
+        assert payload["findings"][0]["severity"] == "alarm"
+        assert payload["findings"][1]["severity"] == "attention"
 
 
 class TestMerge:
