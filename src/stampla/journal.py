@@ -56,12 +56,16 @@ class Journal:
         moves: tuple[FamilyMove, ...],
         kind: str = "rename",
         algorithm: str = "md5",
+        command: str | None = None,
+        created_at: str = "",
     ) -> None:
         self.path = path
         self.root = root
         self.moves = moves
         self.kind = kind
         self.algorithm = algorithm
+        self.command = command
+        self.created_at = created_at
         self._done_path = path.with_suffix(".done")
 
     @classmethod
@@ -72,11 +76,14 @@ class Journal:
         directory: Path | None = None,
         kind: str = "rename",
         algorithm: str = "md5",
+        command: str | None = None,
     ) -> Journal:
         """Write the full plan to a new journal file before any change.
 
         ``kind`` is ``rename`` (sources move away) or ``copy`` (sources
         stay; undo deletes the copies after verifying their digests).
+        ``command`` records which command produced the run, purely as
+        provenance for whoever reads the journal later.
         """
         keys = [move.key for move in moves]
         if len(set(keys)) != len(keys):
@@ -93,6 +100,7 @@ class Journal:
             "version": 2,
             "kind": kind,
             "algorithm": algorithm,
+            "command": command,
             "created_at": stamp,
             "root": str(root),
             "moves": [
@@ -115,7 +123,9 @@ class Journal:
             os.fsync(stream.fileno())
         os.replace(scratch, path)
         _fsync_directory(directory)
-        return cls(path, root, moves, kind=kind, algorithm=algorithm)
+        return cls(
+            path, root, moves, kind=kind, algorithm=algorithm, command=command, created_at=stamp
+        )
 
     @classmethod
     def load(cls, path: Path) -> Journal:
@@ -141,22 +151,55 @@ class Journal:
             moves,
             kind=payload.get("kind", "rename"),
             algorithm=payload.get("algorithm", "md5"),
+            command=payload.get("command"),
+            created_at=payload.get("created_at", ""),
         )
 
     def done_keys(self) -> set[str]:
         """Applied families: done lines minus their undo tombstones, in order."""
-        if not self._done_path.exists():
-            return set()
         done: set[str] = set()
-        for line in self._done_path.read_text(encoding="utf-8").splitlines():
-            line = line.rstrip("\n")
-            if not line:
-                continue
+        for line in self._log_lines():
             if line.startswith("!"):
                 done.discard(line[1:])
             else:
                 done.add(line)
         return done
+
+    def status(self) -> str:
+        """Where this run stands: pending, partial, complete or undone.
+
+        ``partial`` is the interrupted case resume finishes; ``undone``
+        means families were applied once but every one has since been
+        reverted (tombstoned), as opposed to never applied at all.
+        """
+        done = self.done_keys()
+        if len(done) == len(self.moves):
+            return "complete"
+        if done:
+            return "partial"
+        if any(line.startswith("!") for line in self._log_lines()):
+            return "undone"
+        return "pending"
+
+    def summary(self) -> JournalSummary:
+        return JournalSummary(
+            path=self.path,
+            root=self.root,
+            kind=self.kind,
+            command=self.command,
+            created_at=self.created_at,
+            families=len(self.moves),
+            status=self.status(),
+        )
+
+    def _log_lines(self) -> list[str]:
+        if not self._done_path.exists():
+            return []
+        return [
+            line
+            for line in self._done_path.read_text(encoding="utf-8").splitlines()
+            if line.rstrip("\n")
+        ]
 
     def mark_done(self, key: str) -> None:
         self._append(key)
@@ -188,3 +231,38 @@ def list_journals(directory: Path | None = None) -> list[Path]:
     if not directory.is_dir():
         return []
     return sorted(directory.glob("journal-*.json"), key=lambda p: p.stat().st_mtime)
+
+
+@dataclass(frozen=True)
+class JournalSummary:
+    """One line of history: what a journal did, for whom, and its state."""
+
+    path: Path
+    root: Path
+    kind: str
+    command: str | None
+    created_at: str
+    families: int
+    status: str
+
+
+def journal_summaries(
+    directory: Path | None = None, root: Path | None = None
+) -> list[JournalSummary]:
+    """Summaries of every readable journal, oldest first.
+
+    ``root`` narrows the history to one archive — journals are stored
+    globally, but a consumer almost always asks about a single root.
+    Unreadable journal files are skipped; they still appear in
+    :func:`list_journals` for whoever wants to inspect them.
+    """
+    summaries: list[JournalSummary] = []
+    for path in list_journals(directory):
+        try:
+            journal = Journal.load(path)
+        except (OSError, ValueError, KeyError):
+            continue
+        if root is not None and Path(journal.root).resolve() != root.resolve():
+            continue
+        summaries.append(journal.summary())
+    return summaries

@@ -101,7 +101,9 @@ def run_rename(
         problems = validate_plan(tuple(moves), root)
         if problems:
             raise ValueError("plan failed validation:\n" + "\n".join(problems))
-        journal = Journal.create(root, tuple(moves), directory=options.journal_dir)
+        journal = Journal.create(
+            root, tuple(moves), directory=options.journal_dir, command="rename"
+        )
         print(f"journal: {journal.path}", file=sys.stderr)
         result = apply_plan(journal, monitor=monitor)
         for key, error in result.failed:

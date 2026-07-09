@@ -371,6 +371,88 @@ class TestJournal:
     def test_list_journals_empty_dir(self, tmp_path: Path) -> None:
         assert list_journals(tmp_path / "nope") == []
 
+    def test_command_provenance_round_trips(self, root: Path, journal_dir: Path) -> None:
+        make_file(root, "a.nef")
+        move = family(root, "a", ("a.nef", "b.nef"))
+        journal = Journal.create(root, (move,), directory=journal_dir, command="rename")
+        reloaded = Journal.load(journal.path)
+        assert reloaded.command == "rename"
+        assert reloaded.created_at == journal.created_at
+
+    def test_status_walks_the_lifecycle(self, root: Path, journal_dir: Path) -> None:
+        make_file(root, "a.nef")
+        make_file(root, "b.nef")
+        moves = (
+            family(root, "a", ("a.nef", "a2.nef")),
+            family(root, "b", ("b.nef", "b2.nef")),
+        )
+        journal = Journal.create(root, moves, directory=journal_dir)
+        assert journal.status() == "pending"
+        journal.mark_done("a")
+        assert journal.status() == "partial"
+        journal.mark_done("b")
+        assert journal.status() == "complete"
+        journal.mark_undone("a")
+        assert journal.status() == "partial"
+        journal.mark_undone("b")
+        assert journal.status() == "undone"
+
+    def test_summaries_filter_by_root(self, tmp_path: Path, journal_dir: Path) -> None:
+        from stampla.journal import journal_summaries
+
+        first_root = tmp_path / "one"
+        second_root = tmp_path / "two"
+        first_root.mkdir()
+        second_root.mkdir()
+        Journal.create(first_root, (), directory=journal_dir, command="rename")
+        Journal.create(second_root, (), directory=journal_dir, command="import", kind="copy")
+        (journal_dir / "journal-19700101T000000Z-0.json").write_text("not json")
+
+        everything = journal_summaries(directory=journal_dir)
+        assert len(everything) == 2  # the unreadable one is skipped
+        ours = journal_summaries(directory=journal_dir, root=second_root)
+        assert [s.command for s in ours] == ["import"]
+        assert ours[0].kind == "copy"
+        assert ours[0].status == "complete"  # an empty plan has nothing left to do
+
+
+class TestJournalsCli:
+    def test_lists_runs_with_status(
+        self, root: Path, journal_dir: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        make_file(root, "a.nef")
+        move = family(root, "a", ("a.nef", "a2.nef"))
+        journal = Journal.create(root, (move,), directory=journal_dir, command="rename")
+        assert apply_plan(journal).ok
+
+        assert main(["journals"]) == 0
+        out = capsys.readouterr().out
+        assert "rename" in out
+        assert "complete" in out
+
+        assert main(["journals", "--json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        entry = payload["journals"][0]
+        assert entry["command"] == "rename"
+        assert entry["status"] == "complete"
+        assert entry["families"] == 1
+
+    def test_root_filter_narrows_the_history(
+        self, root: Path, journal_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        other = tmp_path / "other"
+        other.mkdir()
+        Journal.create(root, (), directory=journal_dir, command="rename")
+        Journal.create(other, (), directory=journal_dir, command="import", kind="copy")
+
+        assert main(["journals", "--root", str(other), "--json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert [j["command"] for j in payload["journals"]] == ["import"]
+
+    def test_empty_history_says_so(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["journals"]) == 0
+        assert "no journals" in capsys.readouterr().out
+
 
 class TestUndoCli:
     def test_undo_by_path(self, root: Path, journal_dir: Path) -> None:

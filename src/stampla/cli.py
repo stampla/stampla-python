@@ -16,7 +16,7 @@ from stampla.config import Config, ConfigError, load_config
 from stampla.dam import InjectOptions, run_inject
 from stampla.exiftool import ExifToolError
 from stampla.importer import ImportVerdict, apply_import, build_plan, verdict_of
-from stampla.journal import FamilyMove, Journal, list_journals
+from stampla.journal import FamilyMove, Journal, journal_summaries, list_journals
 from stampla.organize import run_organize
 from stampla.progress import Monitor, ProgressEvent
 from stampla.renamer import RenameOptions, run_rename
@@ -111,6 +111,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     organize.add_argument("path", type=Path, help="messy directory to analyze")
 
+    journals = subparsers.add_parser(
+        "journals",
+        help="list journaled apply runs with their status",
+    )
+    journals.add_argument("--config", type=Path, help="TOML configuration file")
+    journals.add_argument(
+        "--root", type=Path, help="only journals for this archive root (overrides the config)"
+    )
+    journals.add_argument("--json", action="store_true", help="machine-readable output")
+
     undo = subparsers.add_parser(
         "undo",
         help="revert a journaled apply run; without arguments, lists journals",
@@ -135,6 +145,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     try:
+        if args.command == "journals":
+            return _run_journals_command(args)
         if args.command == "undo":
             return _run_undo_command(args)
         if args.command == "resume":
@@ -259,6 +271,41 @@ def _journal_result_report(result: object) -> Report:
     for key, error in result.failed:
         report.add(Finding(Bucket.APPLY_FAILED, Path(key), error))
     return report
+
+
+def _run_journals_command(args: argparse.Namespace) -> int:
+    root: Path | None = None
+    if args.root is not None:
+        root = args.root
+    elif args.config is not None:
+        config = load_config(args.config)
+        root = Path(config.root) if config.root else None
+    summaries = journal_summaries(root=root.resolve() if root else None)
+    if args.json:
+        payload = {
+            "command": "journals",
+            "journals": [
+                {
+                    "path": str(s.path),
+                    "root": str(s.root),
+                    "kind": s.kind,
+                    "command": s.command,
+                    "created_at": s.created_at,
+                    "families": s.families,
+                    "status": s.status,
+                }
+                for s in summaries
+            ],
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return 0
+    if not summaries:
+        print("no journals found")
+        return 0
+    for s in summaries:
+        origin = s.command or s.kind
+        print(f"{s.path}  {s.created_at}  {origin}  {s.status}  {s.families} family(ies)  {s.root}")
+    return 0
 
 
 def _run_undo_command(args: argparse.Namespace) -> int:

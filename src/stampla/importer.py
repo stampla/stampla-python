@@ -245,7 +245,12 @@ def apply_import(
         raise ValueError("plan failed validation:\n" + "\n".join(problems))
 
     journal = Journal.create(
-        root, plan.moves, directory=journal_dir, kind="copy", algorithm=plan.algorithm
+        root,
+        plan.moves,
+        directory=journal_dir,
+        kind="copy",
+        algorithm=plan.algorithm,
+        command="import",
     )
     print(f"journal: {journal.path}", file=sys.stderr)
     result = apply_plan(journal, monitor=monitor)
