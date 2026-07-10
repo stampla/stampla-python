@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Naming patterns validate what the archive's promises require:
+  `datetime_format` must use each of `%Y %m %d %H %M %S` exactly once,
+  most significant first (sorting names must sort by capture time), and
+  separators and format literals must be filename-safe on every
+  platform (`:`, Windows-reserved characters and control characters are
+  rejected).
+- The 31-character prefix cap now applies only while a `[dam]` section
+  is configured — it exists to fit rename tokens into the 32-character
+  IPTC TransmissionReference field. Without DAM integration, longer
+  prefixes such as `sha256` at 22 characters are legal.
+
 ## [0.2.0] - 2026-07-10
 
 ### Changed

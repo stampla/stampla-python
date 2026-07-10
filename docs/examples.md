@@ -218,3 +218,22 @@ Migrate with the ordinary commands — `rename --apply` for everything
 the tool owns, `inject --apply` plus the DAM round for DAM-managed
 masters — then delete the `additional` entry. A mixed archive is a
 loudly temporary state, not a destination.
+
+The timestamp shape and the separator are equally configurable, with
+two rules the tool enforces: the format must use each of
+`%Y %m %d %H %M %S` exactly once, most significant first (that is what
+keeps names sorting by capture time), and every literal must be safe in
+filenames (`:` and friends are rejected). A readable scheme is legal:
+
+```toml
+[pattern]
+name = "readable-sha256"
+datetime_format = "%Y-%m-%d %H-%M-%S"
+separator = " "
+digest = "sha256"
+digest_length = 22
+```
+
+One caveat: prefixes above 31 characters (like this one, at 42) cannot
+coexist with a `[dam]` section — DAM rename tokens must fit a
+32-character IPTC field, and the config will refuse the combination.

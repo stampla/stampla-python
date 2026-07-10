@@ -16,7 +16,12 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from stampla.naming import DEFAULT_RAW_EXTENSIONS, Grammar
-from stampla.pattern import DEFAULT_PATTERN, NamingPattern, PatternError
+from stampla.pattern import (
+    DEFAULT_PATTERN,
+    MAX_PREFIX_LENGTH,
+    NamingPattern,
+    PatternError,
+)
 
 _LAYOUT_TOKENS = frozenset({"yyyy", "mm", "dd"})
 
@@ -183,6 +188,15 @@ class Config:
             for tree_path in self.dam.trees:
                 if tree_path not in known:
                     raise ConfigError(f"dam tree {tree_path!r} is not a configured tree")
+            if self.pattern.prefix_length > MAX_PREFIX_LENGTH:
+                raise ConfigError(
+                    f"pattern {self.pattern.name!r} builds"
+                    f" {self.pattern.prefix_length}-character prefixes, but DAM rename"
+                    " tokens live in a 32-character metadata field (IPTC"
+                    f" TransmissionReference), so prefixes may be at most"
+                    f" {MAX_PREFIX_LENGTH} characters while [dam] is configured —"
+                    " shorten digest_length or drop the [dam] section"
+                )
 
     @property
     def photo_master_extensions(self) -> frozenset[str]:

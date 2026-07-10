@@ -72,13 +72,11 @@ class TestValidation:
         with pytest.raises(PatternError, match="digest_length"):
             NamingPattern(name="bad", digest_length=3)
 
-    def test_prefix_length_cap(self) -> None:
-        with pytest.raises(PatternError, match=str(MAX_PREFIX_LENGTH)):
-            NamingPattern(name="bad", digest="sha256", digest_length=16)
-
-    def test_longest_allowed_prefix(self) -> None:
-        pattern = NamingPattern(name="sha256-15", digest="sha256", digest_length=15)
-        assert pattern.prefix_length == MAX_PREFIX_LENGTH
+    def test_long_prefixes_are_legal_without_dam(self) -> None:
+        # the 31-character cap protects the DAM token field; it is
+        # enforced by the config when [dam] is present, not here
+        pattern = NamingPattern(name="sha256-22", digest="sha256", digest_length=22)
+        assert pattern.prefix_length > MAX_PREFIX_LENGTH
 
     def test_unsupported_datetime_token(self) -> None:
         with pytest.raises(PatternError, match="%f"):
@@ -95,3 +93,50 @@ class TestValidation:
     def test_empty_separator_is_allowed(self) -> None:
         pattern = NamingPattern(name="tight", separator="")
         assert pattern.build_prefix(CAPTURED, MD5_FULL) == "20260703_1507279b677b64"
+
+
+class TestSortability:
+    """Sorting names must sort by capture time; the format order enforces it."""
+
+    @pytest.mark.parametrize(
+        "fmt",
+        [
+            "%d%m%Y_%H%M%S",  # day first
+            "%Y%m%d_%S%M%H",  # seconds before hours
+            "%Y%m%d_%H%M",  # missing seconds
+            "%Y%m%d",  # date only
+            "%Y%Y%m%d_%H%M%S",  # duplicate year
+        ],
+    )
+    def test_rejects_unsortable_formats(self, fmt: str) -> None:
+        with pytest.raises(PatternError, match="sorting"):
+            NamingPattern(name="bad", datetime_format=fmt)
+
+    def test_readable_format_is_allowed(self) -> None:
+        pattern = NamingPattern(
+            name="readable",
+            datetime_format="%Y-%m-%d %H-%M-%S",
+            separator=" ",
+            digest="sha256",
+            digest_length=22,
+        )
+        digest = "9773a0c3dc104af370e4b4" + "0" * 42
+        assert pattern.build_prefix(CAPTURED, digest) == (
+            "2026-07-03 15-07-27 9773a0c3dc104af370e4b4"
+        )
+        assert pattern.matches_prefix("2026-07-03 15-07-27 9773a0c3dc104af370e4b4")
+        assert pattern.datetime_of("2026-07-03 15-07-27 9773a0c3dc104af370e4b4") == CAPTURED
+
+
+class TestFilenameSafety:
+    @pytest.mark.parametrize("separator", [":", "?", "*", '"', "|", "<", ">", "\t"])
+    def test_rejects_unsafe_separator(self, separator: str) -> None:
+        with pytest.raises(PatternError, match="not safe in filenames"):
+            NamingPattern(name="bad", separator=separator)
+
+    def test_rejects_unsafe_format_literal(self) -> None:
+        with pytest.raises(PatternError, match="not safe in filenames"):
+            NamingPattern(name="bad", datetime_format="%Y-%m-%d %H:%M:%S")
+
+    def test_space_literals_are_allowed(self) -> None:
+        NamingPattern(name="spaced", datetime_format="%Y-%m-%d %H-%M-%S")

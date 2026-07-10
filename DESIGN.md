@@ -37,7 +37,10 @@ A *pattern* defines the identity part of a filename — the **prefix**:
 - **Capture time** is formatted from a strftime-style format string
   (default `%Y%m%d_%H%M%S`) as naive local wall-clock time — the time a
   human at the scene would have read off a watch. Sorting names sorts by
-  capture time.
+  capture time — and the pattern enforces it: the format must use each of
+  `%Y %m %d %H %M %S` exactly once, most significant first, with only
+  filename-safe literals between them (so `%Y-%m-%d %H-%M-%S` is legal,
+  a day-first or colon-bearing format is rejected outright).
 - **Digest slice** is the first *n* lowercase hex characters of the file's
   content digest (default: 8 characters of MD5). The slice is long enough
   to make collisions within one archive implausible, short enough to keep
@@ -52,8 +55,10 @@ A *pattern* defines the identity part of a filename — the **prefix**:
   means the pixels themselves changed. The mapping is part of the
   pattern's identity: changing it changes what every name means, which is
   by definition a migration.
-- A prefix is capped at 31 characters so it always fits IPTC fields with a
-  32-character limit, which DAM integrations use as a rename token.
+- While a `[dam]` section is configured, the prefix is capped at 31
+  characters so the rename token always fits IPTC fields with a
+  32-character limit. Without DAM integration there is no cap — a
+  `sha256:22` prefix is a legal choice.
 
 Multiple patterns can be recognized simultaneously. The grammar tries the
 primary pattern first, then any additional recognized ones, so an archive

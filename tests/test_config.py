@@ -134,6 +134,22 @@ class TestValidation:
         with pytest.raises(ConfigError, match="dam tree"):
             config_from_dict({"dam": {"trees": ["Nonexistent"]}})
 
+    def test_dam_caps_the_prefix_length(self) -> None:
+        # the rename token must fit IPTC TransmissionReference (32 chars)
+        with pytest.raises(ConfigError, match="TransmissionReference"):
+            config_from_dict(
+                {
+                    "pattern": {"name": "sha256-22", "digest": "sha256", "digest_length": 22},
+                    "dam": {"trees": ["Photos"]},
+                }
+            )
+
+    def test_long_prefix_is_legal_without_dam(self) -> None:
+        config = config_from_dict(
+            {"pattern": {"name": "sha256-22", "digest": "sha256", "digest_length": 22}}
+        )
+        assert config.pattern.prefix_length == 38
+
     def test_empty_date_chain(self) -> None:
         with pytest.raises(ConfigError, match="date chain"):
             config_from_dict({"dates": {"photo": []}})

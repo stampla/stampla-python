@@ -17,44 +17,53 @@ from functools import cached_property
 
 # IPTC's TransmissionReference field, used as a rename token by DAM
 # integrations, is limited to 32 characters. Staying a character below
-# keeps every prefix safely inside that budget.
+# keeps every prefix safely inside that budget. Enforced by the config
+# when a DAM tree is configured; without DAM there is no cap.
 MAX_PREFIX_LENGTH = 31
 
 MIN_DIGEST_LENGTH = 4
 
-_DATETIME_TOKENS = {
-    "%Y": (r"\d{4}", 4),
-    "%m": (r"\d{2}", 2),
-    "%d": (r"\d{2}", 2),
-    "%H": (r"\d{2}", 2),
-    "%M": (r"\d{2}", 2),
-    "%S": (r"\d{2}", 2),
-}
+#: most significant first: this exact order is what makes sorting names
+#: sort by capture time, a promise the archive is built on
+_DATETIME_TOKENS = ("%Y", "%m", "%d", "%H", "%M", "%S")
+
+_TOKEN_WIDTHS = {"%Y": 4, "%m": 2, "%d": 2, "%H": 2, "%M": 2, "%S": 2}
+
+#: characters that are reserved on some filesystem (Windows, HFS) or
+#: break name parsing (the first dot starts the extensions)
+_UNSAFE_CHARS = set('<>:"/\\|?*.')
 
 
 class PatternError(ValueError):
     """Invalid naming pattern definition."""
 
 
-def _compile_datetime_format(fmt: str) -> tuple[str, int]:
-    """Translate a strftime format into a regex and its fixed width."""
+def _check_filename_safe(text: str, what: str) -> None:
+    for ch in text:
+        if ch in _UNSAFE_CHARS or ord(ch) < 32 or ord(ch) == 127:
+            raise PatternError(f"{what} contains {ch!r}, which is not safe in filenames")
+
+
+def _compile_datetime_format(fmt: str) -> tuple[str, int, tuple[str, ...]]:
+    """Translate a strftime format into a regex, its fixed width, its tokens."""
     parts: list[str] = []
+    tokens: list[str] = []
     width = 0
     i = 0
     while i < len(fmt):
         if fmt[i] == "%":
             token = fmt[i : i + 2]
-            if token not in _DATETIME_TOKENS:
+            if token not in _TOKEN_WIDTHS:
                 raise PatternError(f"unsupported datetime token {token!r} in format {fmt!r}")
-            regex, token_width = _DATETIME_TOKENS[token]
-            parts.append(regex)
-            width += token_width
+            parts.append(rf"\d{{{_TOKEN_WIDTHS[token]}}}")
+            tokens.append(token)
+            width += _TOKEN_WIDTHS[token]
             i += 2
         else:
             parts.append(re.escape(fmt[i]))
             width += 1
             i += 1
-    return "".join(parts), width
+    return "".join(parts), width, tuple(tokens)
 
 
 #: digests ExifTool can compute over image data only
@@ -73,6 +82,12 @@ class NamingPattern:
     extensions use the whole file. The mapping is part of the pattern's
     identity: changing it changes what every name means, i.e. it defines
     a new pattern and calls for a migration.
+
+    ``datetime_format`` must use each of the six zero-padded tokens
+    ``%Y %m %d %H %M %S`` exactly once, most significant first, with only
+    filename-safe literals between them. Fixed widths keep parsing
+    unambiguous; the ordering is what makes sorting names sort by
+    capture time.
     """
 
     name: str
@@ -102,15 +117,18 @@ class NamingPattern:
                 f"digest_length must be between {MIN_DIGEST_LENGTH} and {hex_length}"
                 f" for {self.digest}, got {self.digest_length}"
             )
-        if any(ch in self.separator for ch in "./\\"):
-            raise PatternError(f"separator {self.separator!r} contains a reserved character")
-        _, datetime_width = _compile_datetime_format(self.datetime_format)
-        prefix_length = datetime_width + len(self.separator) + self.digest_length
-        if prefix_length > MAX_PREFIX_LENGTH:
+        _check_filename_safe(self.separator, f"separator {self.separator!r}")
+        _, _, tokens = _compile_datetime_format(self.datetime_format)
+        if tokens != _DATETIME_TOKENS:
             raise PatternError(
-                f"prefix would be {prefix_length} characters,"
-                f" above the maximum of {MAX_PREFIX_LENGTH}"
+                f"datetime_format {self.datetime_format!r} must use each of"
+                f" {' '.join(_DATETIME_TOKENS)} exactly once, most significant first,"
+                " so that sorting names sorts by capture time"
             )
+        literals = self.datetime_format
+        for token in _DATETIME_TOKENS:
+            literals = literals.replace(token, "")
+        _check_filename_safe(literals, f"datetime_format {self.datetime_format!r}")
 
     @cached_property
     def datetime_length(self) -> int:
@@ -122,7 +140,7 @@ class NamingPattern:
 
     @cached_property
     def prefix_regex(self) -> re.Pattern[str]:
-        datetime_regex, _ = _compile_datetime_format(self.datetime_format)
+        datetime_regex, _, _ = _compile_datetime_format(self.datetime_format)
         return re.compile(
             f"{datetime_regex}{re.escape(self.separator)}[0-9a-f]{{{self.digest_length}}}"
         )
