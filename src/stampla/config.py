@@ -23,7 +23,7 @@ from stampla.pattern import (
     PatternError,
 )
 
-_LAYOUT_TOKENS = frozenset({"yyyy", "mm", "dd"})
+_LAYOUT_TOKENS = frozenset({"yyyy", "mm", "dd", "shoot"})
 
 # Only masters are content-checked (sidecars inherit their master's
 # prefix), so this lists master-capable formats edited in place. It

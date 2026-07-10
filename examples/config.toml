@@ -23,7 +23,9 @@ ignore = ["NIKON001.DSC", "NC_FLLST.DAT"]
 skip_jpeg_twins = false
 
 # Subtrees of the root, each holding one kind of media. Files are filed
-# into `layout` (tokens: {yyyy}, {mm}, {dd}) under the tree.
+# into `layout` (tokens: {yyyy}, {mm}, {dd}, {shoot}) under the tree.
+# {shoot} files by event — "Events/{yyyy}/{shoot}" — and makes --shoot
+# mandatory for imports into that tree; see docs/shoots.md.
 [[trees]]
 path = "Photos"
 media = "photo"

@@ -91,6 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="limit the import to these directories on the card"
         " (a selective run never clears the card for formatting)",
     )
+    import_cmd.add_argument(
+        "--shoot",
+        help="shoot/job name for this card: fills the {shoot} layout token"
+        " in tree layouts; whitespace becomes underscores",
+    )
 
     inject = subparsers.add_parser(
         "inject",
@@ -452,6 +457,7 @@ def _run_import_command(args: argparse.Namespace) -> int:
             workers=args.workers,
             monitor=monitor,
             only=tuple(args.paths),
+            shoot=args.shoot,
         )
         report = apply_import(plan, root.resolve(), monitor=monitor) if args.apply else plan.report
     verdict = verdict_of(report, applied=args.apply, whole_card=not args.paths)

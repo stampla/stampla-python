@@ -16,6 +16,7 @@ skipped; they never abort the rest of the card.
 
 from __future__ import annotations
 
+import re
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -91,6 +92,7 @@ def build_plan(
     workers: int | None = None,
     monitor: Monitor | None = None,
     only: Sequence[Path] = (),
+    shoot: str | None = None,
 ) -> ImportPlan:
     """Work out every copy the card calls for, without touching anything.
 
@@ -98,9 +100,18 @@ def build_plan(
     batch out of organize, a selection in a front end); files outside
     the selection are out of scope entirely — neither planned nor
     reported.
+
+    ``shoot`` names the shoot/job/session this card belongs to and fills
+    the ``{shoot}`` layout token — the shoot lives in the directory, so
+    filenames and verification are untouched (see docs/shoots.md for why
+    the filename is off limits). A tree whose layout files by shoot
+    refuses to import without one: guessing a shoot would file files
+    somewhere a later import would not find them.
     """
     if not card.is_dir():
         raise ValueError(f"card path is not a directory: {card}")
+    shoot = normalize_shoot(shoot)
+    _check_shoot_against_config(config, shoot)
     monitor = monitor or Monitor()
     selection = _selection_roots(card, only)
     plan = ImportPlan(algorithm=config.pattern.digest)
@@ -209,7 +220,7 @@ def build_plan(
                     )
                 )
         prefix = config.pattern.build_prefix(resolved.value, naming[master])
-        destination = root / tree.path / _render_layout(tree.layout, resolved)
+        destination = root / tree.path / _render_layout(tree.layout, resolved, shoot)
         trimmed = CardGroup(directory=group.directory, base=group.base, members=members)
         renames = _member_targets(trimmed, prefix, destination)
         if any(rename.new.exists() for rename in renames):
@@ -419,11 +430,56 @@ def _compare_with_archive(
     return problems
 
 
-def _render_layout(layout: str, resolved: ResolvedDate) -> Path:
+def _render_layout(layout: str, resolved: ResolvedDate, shoot: str | None = None) -> Path:
     value = resolved.value
     rendered = (
         layout.replace("{yyyy}", f"{value.year:04d}")
         .replace("{mm}", f"{value.month:02d}")
         .replace("{dd}", f"{value.day:02d}")
     )
+    if "{shoot}" in rendered:
+        if shoot is None:
+            raise ValueError(
+                f"this tree files by shoot ({layout!r}); pass --shoot to import into it"
+            )
+        rendered = rendered.replace("{shoot}", shoot)
     return Path(rendered)
+
+
+#: what a shoot name may contain after normalization; anything else is
+#: rejected rather than silently mangled — names must be predictable
+_SHOOT_CHARS = re.compile(r"[A-Za-z0-9._-]+\Z")
+_SHOOT_MAX = 64
+
+
+def normalize_shoot(shoot: str | None) -> str | None:
+    """One predictable rule: trim, collapse whitespace runs to ``_``.
+
+    Rejects anything else (path separators, unicode punctuation, an
+    empty result) instead of guessing — a mangled shoot name would file
+    photos somewhere the photographer would not look.
+    """
+    if shoot is None:
+        return None
+    collapsed = "_".join(shoot.split())
+    if not collapsed:
+        raise ValueError("shoot name is empty")
+    if len(collapsed) > _SHOOT_MAX:
+        raise ValueError(f"shoot name exceeds {_SHOOT_MAX} characters: {collapsed!r}")
+    if not _SHOOT_CHARS.match(collapsed):
+        bad = sorted({c for c in collapsed if not re.match(r"[A-Za-z0-9._-]", c)})
+        raise ValueError(
+            f"shoot name contains unsupported character(s) {bad!r}; allowed:"
+            " letters, digits, dot, underscore, hyphen (spaces become underscores)"
+        )
+    return collapsed
+
+
+def _check_shoot_against_config(config: Config, shoot: str | None) -> None:
+    """A shoot that would be silently ignored is an error, not a shrug."""
+    uses_shoot = any("{shoot}" in tree.layout for tree in config.trees)
+    if shoot is not None and not uses_shoot:
+        raise ValueError(
+            "a shoot name was given, but no tree layout contains {shoot} —"
+            " it would be silently ignored"
+        )

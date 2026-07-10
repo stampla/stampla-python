@@ -405,3 +405,85 @@ class TestImportPolicies:
         month = archive / "Photos" / "2026" / "2026-07"
         assert len(list(month.glob("*.nef"))) == 1
         assert list(month.glob("*.jpg")) == []
+
+
+SHOOT_CONFIG = """
+root = {root!r}
+
+[[trees]]
+path = "Events"
+media = "photo"
+layout = "{{yyyy}}/{{shoot}}"
+
+[extensions]
+raw = ["jpg"]
+"""
+
+
+@requires_exiftool
+class TestShootToken:
+    def configure(self, tmp_path: Path, extra: str = "") -> Path:
+        (tmp_path / "config.toml").write_text(SHOOT_CONFIG.format(root=str(tmp_path)) + extra)
+        return tmp_path
+
+    def run_shoot(self, archive: Path, card: Path, *extra: str) -> tuple[int, dict[str, object]]:
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = main(
+                ["import", str(card), "--config", str(archive / "config.toml"), "--json", *extra]
+            )
+        return code, json.loads(buffer.getvalue())
+
+    def test_shoot_fills_the_layout_token(self, tmp_path: Path) -> None:
+        archive = self.configure(tmp_path)
+        card = tmp_path / "card"
+        make_card_photo(card, "IMG_5001", "2026:05:16 15:20:41")
+
+        code, payload = self.run_shoot(archive, card, "--shoot", "Anna Peter Wedding", "--apply")
+        assert code == 0, payload
+        shoot_dir = archive / "Events" / "2026" / "Anna_Peter_Wedding"
+        assert list(shoot_dir.glob("20260516_152041_*.jpg"))
+
+    def test_shoot_layout_refuses_to_import_without_a_shoot(self, tmp_path: Path) -> None:
+        archive = self.configure(tmp_path)
+        card = tmp_path / "card"
+        make_card_photo(card, "IMG_5001", "2026:05:16 15:20:41")
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = main(["import", str(card), "--config", str(archive / "config.toml"), "--apply"])
+        assert code == 2  # never guesses a shoot
+
+    def test_hostile_shoot_names_are_rejected(self, tmp_path: Path) -> None:
+        archive = self.configure(tmp_path)
+        card = tmp_path / "card"
+        make_card_photo(card, "IMG_5001", "2026:05:16 15:20:41")
+        for hostile in ("../escape", "a/b", "", "x" * 65):
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                code = main(
+                    [
+                        "import",
+                        str(card),
+                        "--config",
+                        str(archive / "config.toml"),
+                        "--shoot",
+                        hostile,
+                    ]
+                )
+            assert code == 2, hostile
+
+    def test_shoot_dir_archive_verifies_clean(self, tmp_path: Path) -> None:
+        archive = self.configure(tmp_path)
+        card = tmp_path / "card"
+        make_card_photo(card, "IMG_5001", "2026:05:16 15:20:41")
+        (card / "IMG_5001.xmp").write_text("<x:xmpmeta/>")
+        code, payload = self.run_shoot(archive, card, "--shoot", "Anna Peter Wedding", "--apply")
+        assert code == 0, payload
+
+        # the shoot lives in the directory: names and verification untouched
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            verify_code = main(["verify", "--config", str(tmp_path / "config.toml"), "--json"])
+        verify_payload = json.loads(buffer.getvalue())
+        assert verify_code == 0, verify_payload
+        assert verify_payload["summary"]["ok"] == 1
