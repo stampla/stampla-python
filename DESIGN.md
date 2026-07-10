@@ -192,7 +192,15 @@ disagreements:
 | `collision` | two masters derive the same name, i.e. duplicate content |
 | `ambiguous-master` | several same-prefix master candidates and content settles nothing |
 | `orphan-group` | sidecars whose master is gone |
+| `misplaced` | the group sits in a folder its name-derived layout does not map to |
 | `malformed` / `unnamed` | inventory of files outside the scheme |
+
+Because a tree's layout maps each capture time to a directory and the
+capture time is in the name, the correct folder for a group is derivable
+too — so `verify` reports a group shelved elsewhere as `misplaced`, and
+`relocate` moves whole groups to the folder their name belongs in
+(except a `{shoot}` segment, which is chosen at import and cannot be
+derived back).
 
 Every bucket also carries a severity — `alarm`, `attention`, `expected`
 or `safe` — so a consumer (a script reading `--json`, a front end) never

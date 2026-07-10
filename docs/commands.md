@@ -121,6 +121,36 @@ $ stampla rename --config archive.toml
 dry run: 1 rename(s) planned; pass --apply to execute
 ```
 
+## relocate
+
+The name carries the capture time and a tree's layout maps a capture
+time to a directory, so the correct folder for every named group is
+derivable from its name alone. `stampla relocate` moves whole
+groups — master and every sidecar — to the folder their name belongs
+in, after a layout change or a hand-move gone wrong. Like `rename` it is
+a dry run by default, showing what would move; `--apply` executes
+through the same validated, write-ahead-journaled engine, so a run is
+resumable and `stampla undo` reverts it.
+
+```console
+$ stampla relocate --config archive.toml
+  /archive/Photos/2026/2026-02/20260105_123000_deadbeef.jpg  ->  /archive/Photos/2026/2026-01/20260105_123000_deadbeef.jpg
+
+dry run: 1 group(s) would move; pass --apply to relocate
+```
+
+Two kinds of tree are never moved. A **DAM-managed tree** tracks files
+by path, so moving them in the Finder would orphan the catalog entries;
+relocate reports the misplacement and emits a checklist to execute
+*inside* the DAM (Lightroom Classic: drag in the Folders panel), where
+moves are catalog-safe — and explicitly targeting a DAM-managed tree
+with `--apply` is an error, never a partial run. A **`{shoot}` segment**
+names a shoot chosen at import and recorded nowhere else, so it can
+never be derived back from a name; a group misplaced *around* the shoot
+segment (say, filed under the wrong year) is reported, but the shoot
+folder to put it in is not derivable, so it is left for you to move by
+hand.
+
 ## organize
 
 Triage for the messy tree every archive drags along. Runs the import
