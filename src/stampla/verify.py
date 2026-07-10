@@ -27,9 +27,10 @@ from stampla.exiftool import ExifTool
 from stampla.group import Group, group_by_prefix
 from stampla.manifest import Manifest
 from stampla.pattern import NamingPattern
+from stampla.places import group_placement
 from stampla.progress import Monitor
 from stampla.report import Bucket, Finding, Report
-from stampla.scan import FileStatus, ScannedFile, scan_tree
+from stampla.scan import FileStatus, ScannedFile, scan_tree, tree_targets
 
 
 @dataclass(frozen=True)
@@ -54,8 +55,10 @@ def run_verify(
     manifest = Manifest.load(root.resolve()) if options.use_manifest else None
     report = Report()
     with ExifTool(workers=options.workers) as tool:
-        for tree, scan_root in _targets(config, root, paths):
-            report.merge(_verify_tree(tool, tree, scan_root, config, options, manifest, monitor))
+        for tree, tree_root, scan_root in tree_targets(config, root, paths):
+            report.merge(
+                _verify_tree(tool, tree, tree_root, scan_root, config, options, manifest, monitor)
+            )
     if manifest is not None:
         if manifest.stale_trusted:
             report.hints.append(
@@ -77,31 +80,10 @@ def _scan_with_monitor(scan_root: Path, config: Config, monitor: Monitor) -> lis
     return files
 
 
-def _targets(config: Config, root: Path, paths: Sequence[Path]) -> list[tuple[Tree, Path]]:
-    targets: list[tuple[Tree, Path]] = []
-    for tree in config.trees:
-        tree_root = (root / tree.path).resolve()
-        if not paths:
-            if tree_root.is_dir():
-                targets.append((tree, tree_root))
-            continue
-        for path in paths:
-            resolved = path.resolve()
-            if resolved.is_relative_to(tree_root):
-                if not resolved.is_dir():
-                    raise ValueError(f"expected a directory, got: {path}")
-                targets.append((tree, resolved))
-    if not targets:
-        raise ValueError(
-            "nothing to verify: no configured tree matches "
-            + (", ".join(str(p) for p in paths) if paths else str(root))
-        )
-    return targets
-
-
 def _verify_tree(
     tool: ExifTool,
     tree: Tree,
+    tree_root: Path,
     scan_root: Path,
     config: Config,
     options: VerifyOptions,
@@ -127,6 +109,9 @@ def _verify_tree(
 
     groups = group_by_prefix(files)
     report.groups = len(groups)
+
+    for group in groups:
+        _check_placement(report, group, tree, tree_root)
 
     if tree.media == "photo":
         master_extensions = config.photo_master_extensions
@@ -191,6 +176,28 @@ def _verify_tree(
                     )
                 )
     return report
+
+
+def _check_placement(report: Report, group: Group, tree: Tree, tree_root: Path) -> None:
+    """The name says where the group belongs; report it shelved elsewhere.
+
+    A ``{shoot}`` segment matches any directory name — the shoot is not
+    derivable from the name.
+    """
+    placement = group_placement(group, tree.layout, tree_root)
+    if placement is None:
+        return
+    home, expected, actual = placement
+    if expected.matches(actual):
+        return
+    report.add(
+        Finding(
+            Bucket.MISPLACED,
+            home,
+            f"sits in {actual}/ but its name belongs in {expected}/",
+            data={"actual": str(actual), "expected": str(expected)},
+        )
+    )
 
 
 def _classify_group(

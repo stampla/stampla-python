@@ -17,8 +17,12 @@ from dataclasses import dataclass
 from enum import Enum
 from fnmatch import fnmatchcase
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from stampla.naming import Grammar, ParsedName
+
+if TYPE_CHECKING:
+    from stampla.config import Config, Tree
 
 
 class FileStatus(Enum):
@@ -73,3 +77,33 @@ def _dir_excluded(relative: str, name: str, excludes: Sequence[str]) -> bool:
         or fnmatchcase(name, pattern)
         for pattern in excludes
     )
+
+
+def tree_targets(
+    config: Config, root: Path, paths: Sequence[Path]
+) -> list[tuple[Tree, Path, Path]]:
+    """(tree, tree root, scan root) for every tree a command should walk.
+
+    Without ``paths`` every existing tree is walked whole; with them,
+    each path must be a directory inside some configured tree and scopes
+    the walk to that subtree.
+    """
+    targets: list[tuple[Tree, Path, Path]] = []
+    for tree in config.trees:
+        tree_root = (root / tree.path).resolve()
+        if not paths:
+            if tree_root.is_dir():
+                targets.append((tree, tree_root, tree_root))
+            continue
+        for path in paths:
+            resolved = path.resolve()
+            if resolved.is_relative_to(tree_root):
+                if not resolved.is_dir():
+                    raise ValueError(f"expected a directory, got: {path}")
+                targets.append((tree, tree_root, resolved))
+    if not targets:
+        raise ValueError(
+            "no configured tree matches "
+            + (", ".join(str(p) for p in paths) if paths else str(root))
+        )
+    return targets

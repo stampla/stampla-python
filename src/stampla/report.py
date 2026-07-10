@@ -60,6 +60,9 @@ class Bucket(Enum):
     MTIME_DATED = "mtime-dated"
     NAME_DATED = "name-dated"
     APPLY_FAILED = "apply-failed"
+    MISPLACED = "misplaced"
+    RELOCATE_PENDING = "relocate-pending"
+    RELOCATED = "relocated"
 
     @property
     def severity(self) -> Severity:
@@ -80,6 +83,7 @@ _SEVERITIES = {
     Bucket.OTHER_PATTERN: Severity.ATTENTION,
     Bucket.MTIME_DATED: Severity.ATTENTION,
     Bucket.MALFORMED: Severity.ATTENTION,
+    Bucket.MISPLACED: Severity.ATTENTION,
     Bucket.UNNAMED: Severity.ATTENTION,
     Bucket.EDIT_DRIFT: Severity.EXPECTED,
     Bucket.NAME_DATED: Severity.SAFE,
@@ -87,6 +91,8 @@ _SEVERITIES = {
     Bucket.TOKEN_WRITTEN: Severity.SAFE,
     Bucket.RENAME_PENDING: Severity.SAFE,
     Bucket.RENAMED: Severity.SAFE,
+    Bucket.RELOCATE_PENDING: Severity.SAFE,
+    Bucket.RELOCATED: Severity.SAFE,
     Bucket.ALREADY_IMPORTED: Severity.SAFE,
     Bucket.IGNORED: Severity.SAFE,
 }
@@ -111,6 +117,7 @@ BUCKET_ORDER = (
     Bucket.OTHER_PATTERN,
     Bucket.MTIME_DATED,
     Bucket.NAME_DATED,
+    Bucket.MISPLACED,
     Bucket.MALFORMED,
     Bucket.EDIT_DRIFT,
     Bucket.UNNAMED,
@@ -118,6 +125,8 @@ BUCKET_ORDER = (
     Bucket.TOKEN_WRITTEN,
     Bucket.RENAME_PENDING,
     Bucket.RENAMED,
+    Bucket.RELOCATE_PENDING,
+    Bucket.RELOCATED,
     Bucket.ALREADY_IMPORTED,
     Bucket.IGNORED,
 )
