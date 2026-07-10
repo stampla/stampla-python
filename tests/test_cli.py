@@ -9,6 +9,8 @@ import pytest
 import stampla.cli as cli_module
 from stampla import __version__
 from stampla.cli import main
+from stampla.relocate import RelocateOptions
+from stampla.report import Report
 
 
 def test_version_flag_prints_version(capsys: pytest.CaptureFixture[str]) -> None:
@@ -36,3 +38,22 @@ def test_interrupt_exits_130_and_points_at_resume(
     monkeypatch.setattr(cli_module, "run_verify", interrupted)
     assert main(["verify", "--config", str(tmp_path / "config.toml")]) == 130
     assert "resume" in capsys.readouterr().err
+
+
+def test_relocate_dispatches_to_its_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "config.toml").write_text(f"root = {str(tmp_path)!r}\n")
+    seen: dict[str, object] = {}
+
+    def fake_relocate(
+        config: object,
+        root: object,
+        paths: object,
+        options: RelocateOptions,
+        monitor: object,
+    ) -> tuple[Report, tuple[object, ...]]:
+        seen["apply"] = options.apply
+        return Report(), ()
+
+    monkeypatch.setattr(cli_module, "run_relocate", fake_relocate)
+    assert main(["relocate", "--config", str(tmp_path / "config.toml"), "--apply"]) == 0
+    assert seen["apply"] is True
