@@ -19,6 +19,7 @@ from stampla.importer import ImportVerdict, apply_import, build_plan, verdict_of
 from stampla.journal import GroupMove, Journal, journal_summaries, list_journals
 from stampla.organize import run_organize
 from stampla.progress import Monitor, ProgressEvent
+from stampla.relocate import RelocateOptions, run_relocate
 from stampla.renamer import RenameOptions, run_rename
 from stampla.report import Bucket, Finding, Report
 from stampla.verify import VerifyOptions, run_verify
@@ -121,6 +122,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="limit renaming to these paths (default: all configured trees)",
     )
 
+    relocate = subparsers.add_parser(
+        "relocate",
+        parents=[common, applying],
+        help="move named groups to the folder their name belongs in (tree layout);"
+        " DAM-managed trees get a checklist instead",
+    )
+    relocate.add_argument(
+        "paths",
+        nargs="*",
+        type=Path,
+        help="limit relocation to these paths (default: all configured trees)",
+    )
+
     organize = subparsers.add_parser(
         "organize",
         parents=[common],
@@ -184,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_inject_command(args)
         if args.command == "rename":
             return _run_rename_command(args)
+        if args.command == "relocate":
+            return _run_relocate_command(args)
         if args.command == "organize":
             return _run_organize_command(args)
         return _run_verify_command(args)
@@ -529,6 +545,26 @@ def _run_rename_command(args: argparse.Namespace) -> int:
     _emit(
         args,
         "rename",
+        report,
+        plan=moves,
+        applied=args.apply,
+        text_extra=extra,
+        root=root.resolve(),
+    )
+    return 1 if report.has_problems else 0
+
+
+def _run_relocate_command(args: argparse.Namespace) -> int:
+    config, root = _config_and_root(args)
+    options = RelocateOptions(apply=args.apply)
+    with _progress(args) as monitor:
+        report, moves = run_relocate(config, root.resolve(), tuple(args.paths), options, monitor)
+    extra: list[str] = []
+    if not args.apply and moves:
+        extra.append(f"\ndry run: {len(moves)} group(s) would move; pass --apply to relocate")
+    _emit(
+        args,
+        "relocate",
         report,
         plan=moves,
         applied=args.apply,
