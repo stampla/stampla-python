@@ -9,7 +9,7 @@ import pytest
 
 from stampla.apply import apply_plan, undo_journal, validate_plan
 from stampla.cli import main
-from stampla.journal import FamilyMove, Journal, Rename, list_journals
+from stampla.journal import GroupMove, Journal, Rename, list_journals
 
 
 @pytest.fixture
@@ -31,8 +31,8 @@ def make_file(root: Path, name: str) -> Path:
     return path
 
 
-def family(root: Path, key: str, *pairs: tuple[str, str]) -> FamilyMove:
-    return FamilyMove(
+def group(root: Path, key: str, *pairs: tuple[str, str]) -> GroupMove:
+    return GroupMove(
         key=key,
         renames=tuple(Rename(old=root / old, new=root / new) for old, new in pairs),
     )
@@ -41,31 +41,31 @@ def family(root: Path, key: str, *pairs: tuple[str, str]) -> FamilyMove:
 class TestValidatePlan:
     def test_clean_plan(self, root: Path) -> None:
         make_file(root, "a.nef")
-        move = family(root, "a", ("a.nef", "b.nef"))
+        move = group(root, "a", ("a.nef", "b.nef"))
         assert validate_plan((move,), root) == []
 
     def test_missing_source(self, root: Path) -> None:
-        move = family(root, "a", ("ghost.nef", "b.nef"))
+        move = group(root, "a", ("ghost.nef", "b.nef"))
         assert any("source missing" in p for p in validate_plan((move,), root))
 
     def test_existing_target(self, root: Path) -> None:
         make_file(root, "a.nef")
         make_file(root, "b.nef")
-        move = family(root, "a", ("a.nef", "b.nef"))
+        move = group(root, "a", ("a.nef", "b.nef"))
         assert any("already exists" in p for p in validate_plan((move,), root))
 
-    def test_duplicate_targets_across_families(self, root: Path) -> None:
+    def test_duplicate_targets_across_groups(self, root: Path) -> None:
         make_file(root, "a.nef")
         make_file(root, "b.nef")
         moves = (
-            family(root, "a", ("a.nef", "same.nef")),
-            family(root, "b", ("b.nef", "same.nef")),
+            group(root, "a", ("a.nef", "same.nef")),
+            group(root, "b", ("b.nef", "same.nef")),
         )
         assert any("duplicate target" in p for p in validate_plan(moves, root))
 
     def test_target_escaping_root(self, root: Path) -> None:
         make_file(root, "a.nef")
-        move = FamilyMove(
+        move = GroupMove(
             key="a",
             renames=(Rename(old=root / "a.nef", new=root.parent / "outside.nef"),),
         )
@@ -75,13 +75,13 @@ class TestValidatePlan:
         make_file(root, "a.nef")
         make_file(root, "b.nef")
         moves = (
-            family(root, "a", ("a.nef", "c.nef")),
-            family(root, "b", ("b.nef", "a.nef")),
+            group(root, "a", ("a.nef", "c.nef")),
+            group(root, "b", ("b.nef", "a.nef")),
         )
         assert any("both a source and a target" in p for p in validate_plan(moves, root))
 
-    def test_empty_family(self, root: Path) -> None:
-        move = FamilyMove(key="a", renames=())
+    def test_empty_group(self, root: Path) -> None:
+        move = GroupMove(key="a", renames=())
         assert any("empty" in p for p in validate_plan((move,), root))
 
 
@@ -89,7 +89,7 @@ class TestApply:
     def test_applies_and_journals(self, root: Path, journal_dir: Path) -> None:
         make_file(root, "a.nef")
         make_file(root, "a.xmp")
-        move = family(root, "a", ("a.nef", "b.nef"), ("a.xmp", "b.xmp"))
+        move = group(root, "a", ("a.nef", "b.nef"), ("a.xmp", "b.xmp"))
         journal = Journal.create(root, (move,), directory=journal_dir)
         result = apply_plan(journal)
 
@@ -100,12 +100,12 @@ class TestApply:
         assert (root / "b.xmp").exists()
         assert journal.done_keys() == {"a"}
 
-    def test_resume_skips_done_families(self, root: Path, journal_dir: Path) -> None:
+    def test_resume_skips_done_groups(self, root: Path, journal_dir: Path) -> None:
         make_file(root, "a.nef")
         make_file(root, "b.nef")
-        moves = (family(root, "a", ("a.nef", "a2.nef")), family(root, "b", ("b.nef", "b2.nef")))
+        moves = (group(root, "a", ("a.nef", "a2.nef")), group(root, "b", ("b.nef", "b2.nef")))
         journal = Journal.create(root, moves, directory=journal_dir)
-        journal.mark_done("a")  # simulate a crash after family a completed
+        journal.mark_done("a")  # simulate a crash after group a completed
 
         result = apply_plan(journal)
         assert result.skipped == ["a"]
@@ -113,11 +113,11 @@ class TestApply:
         assert (root / "a.nef").exists()  # was never actually renamed here
         assert (root / "b2.nef").exists()
 
-    def test_family_rolls_back_on_midway_failure(self, root: Path, journal_dir: Path) -> None:
+    def test_group_rolls_back_on_midway_failure(self, root: Path, journal_dir: Path) -> None:
         make_file(root, "a.nef")
         make_file(root, "a.xmp")
         make_file(root, "blocked.xmp")  # second rename's target already exists
-        move = family(root, "a", ("a.nef", "renamed.nef"), ("a.xmp", "blocked.xmp"))
+        move = group(root, "a", ("a.nef", "renamed.nef"), ("a.xmp", "blocked.xmp"))
         journal = Journal.create(root, (move,), directory=journal_dir)
 
         result = apply_plan(journal)
@@ -128,13 +128,13 @@ class TestApply:
         assert not (root / "renamed.nef").exists()
         assert journal.done_keys() == set()
 
-    def test_other_families_proceed_after_one_fails(self, root: Path, journal_dir: Path) -> None:
+    def test_other_groups_proceed_after_one_fails(self, root: Path, journal_dir: Path) -> None:
         make_file(root, "a.nef")
         make_file(root, "taken.nef")
         make_file(root, "b.nef")
         moves = (
-            family(root, "a", ("a.nef", "taken.nef")),
-            family(root, "b", ("b.nef", "fine.nef")),
+            group(root, "a", ("a.nef", "taken.nef")),
+            group(root, "b", ("b.nef", "fine.nef")),
         )
         journal = Journal.create(root, moves, directory=journal_dir)
         result = apply_plan(journal)
@@ -152,7 +152,7 @@ class TestDisasterPaths:
         make_file(root, "a.nef")
         make_file(root, "a.xmp")
         make_file(root, "blocked.xmp")
-        move = family(root, "a", ("a.nef", "renamed.nef"), ("a.xmp", "blocked.xmp"))
+        move = group(root, "a", ("a.nef", "renamed.nef"), ("a.xmp", "blocked.xmp"))
         journal = Journal.create(root, (move,), directory=journal_dir)
 
         real = apply_module._no_clobber_rename
@@ -171,15 +171,13 @@ class TestDisasterPaths:
         assert "restore from the journal manually" in result.failed[0][1]
         assert journal.done_keys() == set()  # never marked done
 
-    def test_copy_family_cleans_up_after_midway_failure(
-        self, root: Path, journal_dir: Path
-    ) -> None:
+    def test_copy_group_cleans_up_after_midway_failure(self, root: Path, journal_dir: Path) -> None:
         card = root.parent / "card"
         card.mkdir()
         (card / "a.nef").write_bytes(b"a")
         (card / "a.xmp").write_bytes(b"x")
         make_file(root, "taken.xmp")  # second copy's target exists
-        move = FamilyMove(
+        move = GroupMove(
             key="a",
             renames=(
                 Rename(old=card / "a.nef", new=root / "copied.nef"),
@@ -207,7 +205,7 @@ class TestDisasterPaths:
             raise OSError("I/O error mid-copy")
 
         monkeypatch.setattr(shutil_module, "copy2", exploding_copy)
-        move = FamilyMove(key="a", renames=(Rename(old=card / "a.nef", new=root / "b.nef"),))
+        move = GroupMove(key="a", renames=(Rename(old=card / "a.nef", new=root / "b.nef"),))
         journal = Journal.create(root, (move,), directory=journal_dir, kind="copy")
         result = apply_plan(journal)
         assert not result.ok
@@ -220,7 +218,7 @@ class TestSafetyGuarantees:
         from stampla.apply import ArchiveLockError, archive_lock
 
         make_file(root, "a.nef")
-        move = family(root, "a", ("a.nef", "b.nef"))
+        move = group(root, "a", ("a.nef", "b.nef"))
         journal = Journal.create(root, (move,), directory=journal_dir)
         with archive_lock(root), pytest.raises(ArchiveLockError, match="lock"):
             apply_plan(journal)
@@ -234,7 +232,7 @@ class TestSafetyGuarantees:
         source = card / "a.nef"
         source.write_bytes(b"payload")
         digest = hashlib.md5(b"payload").hexdigest()
-        move = FamilyMove(
+        move = GroupMove(
             key="a",
             renames=(Rename(old=source, new=root / "copied.nef", digest=digest),),
         )
@@ -255,7 +253,7 @@ class TestSafetyGuarantees:
         source = card / "a.nef"
         source.write_bytes(b"payload")
         digest = hashlib.md5(b"payload").hexdigest()
-        move = FamilyMove(
+        move = GroupMove(
             key="a",
             renames=(Rename(old=source, new=root / "copied.nef", digest=digest),),
         )
@@ -265,11 +263,11 @@ class TestSafetyGuarantees:
         assert not (root / "copied.nef").exists()
         assert source.exists()
 
-    def test_crash_completed_family_is_recovered_on_resume(
+    def test_crash_completed_group_is_recovered_on_resume(
         self, root: Path, journal_dir: Path
     ) -> None:
         make_file(root, "a.nef")
-        move = family(root, "a", ("a.nef", "b.nef"))
+        move = group(root, "a", ("a.nef", "b.nef"))
         journal = Journal.create(root, (move,), directory=journal_dir)
         # simulate: the rename happened but the crash hit before mark_done
         (root / "a.nef").rename(root / "b.nef")
@@ -282,7 +280,7 @@ class TestSafetyGuarantees:
 
     def test_undo_then_reapply_via_tombstones(self, root: Path, journal_dir: Path) -> None:
         make_file(root, "a.nef")
-        move = family(root, "a", ("a.nef", "b.nef"))
+        move = group(root, "a", ("a.nef", "b.nef"))
         journal = Journal.create(root, (move,), directory=journal_dir)
         assert apply_plan(journal).ok
         assert undo_journal(journal).ok
@@ -295,8 +293,8 @@ class TestSafetyGuarantees:
         make_file(root, "a.nef")
         make_file(root, "b.nef")
         moves = (
-            family(root, "k", ("a.nef", "a2.nef")),
-            family(root, "k", ("b.nef", "b2.nef")),
+            group(root, "k", ("a.nef", "a2.nef")),
+            group(root, "k", ("b.nef", "b2.nef")),
         )
         assert any("duplicate journal key" in p for p in validate_plan(moves, root))
         with pytest.raises(ValueError, match="unique"):
@@ -306,7 +304,7 @@ class TestSafetyGuarantees:
 class TestContainment:
     def test_apply_rechecks_target_containment(self, root: Path, journal_dir: Path) -> None:
         from stampla.apply import _containment_error
-        from stampla.journal import FamilyMove as FM
+        from stampla.journal import GroupMove as FM
 
         make_file(root, "a.nef")
         escaping = FM(
@@ -322,7 +320,7 @@ class TestUndo:
     def test_round_trip(self, root: Path, journal_dir: Path) -> None:
         make_file(root, "a.nef")
         make_file(root, "a.xmp")
-        move = family(root, "a", ("a.nef", "b.nef"), ("a.xmp", "b.xmp"))
+        move = group(root, "a", ("a.nef", "b.nef"), ("a.xmp", "b.xmp"))
         journal = Journal.create(root, (move,), directory=journal_dir)
         assert apply_plan(journal).ok
 
@@ -334,9 +332,9 @@ class TestUndo:
         assert not (root / "b.nef").exists()
         assert journal.done_keys() == set()
 
-    def test_undo_skips_never_applied_families(self, root: Path, journal_dir: Path) -> None:
+    def test_undo_skips_never_applied_groups(self, root: Path, journal_dir: Path) -> None:
         make_file(root, "a.nef")
-        move = family(root, "a", ("a.nef", "b.nef"))
+        move = group(root, "a", ("a.nef", "b.nef"))
         journal = Journal.create(root, (move,), directory=journal_dir)
         result = undo_journal(journal)  # nothing was applied
         assert result.applied == []
@@ -344,7 +342,7 @@ class TestUndo:
 
     def test_undo_refuses_to_clobber(self, root: Path, journal_dir: Path) -> None:
         make_file(root, "a.nef")
-        move = family(root, "a", ("a.nef", "b.nef"))
+        move = group(root, "a", ("a.nef", "b.nef"))
         journal = Journal.create(root, (move,), directory=journal_dir)
         assert apply_plan(journal).ok
         make_file(root, "a.nef")  # someone recreated the original name
@@ -356,7 +354,7 @@ class TestUndo:
 class TestJournal:
     def test_persists_and_reloads(self, root: Path, journal_dir: Path) -> None:
         make_file(root, "zdjęcie ą.nef")
-        move = family(root, "rodzina-ą", ("zdjęcie ą.nef", "b.nef"))
+        move = group(root, "rodzina-ą", ("zdjęcie ą.nef", "b.nef"))
         journal = Journal.create(root, (move,), directory=journal_dir)
 
         reloaded = Journal.load(journal.path)
@@ -373,7 +371,7 @@ class TestJournal:
 
     def test_command_provenance_round_trips(self, root: Path, journal_dir: Path) -> None:
         make_file(root, "a.nef")
-        move = family(root, "a", ("a.nef", "b.nef"))
+        move = group(root, "a", ("a.nef", "b.nef"))
         journal = Journal.create(root, (move,), directory=journal_dir, command="rename")
         reloaded = Journal.load(journal.path)
         assert reloaded.command == "rename"
@@ -383,8 +381,8 @@ class TestJournal:
         make_file(root, "a.nef")
         make_file(root, "b.nef")
         moves = (
-            family(root, "a", ("a.nef", "a2.nef")),
-            family(root, "b", ("b.nef", "b2.nef")),
+            group(root, "a", ("a.nef", "a2.nef")),
+            group(root, "b", ("b.nef", "b2.nef")),
         )
         journal = Journal.create(root, moves, directory=journal_dir)
         assert journal.status() == "pending"
@@ -421,7 +419,7 @@ class TestHistoryCli:
         self, root: Path, journal_dir: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         make_file(root, "a.nef")
-        move = family(root, "a", ("a.nef", "a2.nef"))
+        move = group(root, "a", ("a.nef", "a2.nef"))
         journal = Journal.create(root, (move,), directory=journal_dir, command="rename")
         assert apply_plan(journal).ok
 
@@ -435,7 +433,7 @@ class TestHistoryCli:
         entry = payload["history"][0]
         assert entry["command"] == "rename"
         assert entry["status"] == "complete"
-        assert entry["families"] == 1
+        assert entry["groups"] == 1
 
     def test_root_filter_narrows_the_history(
         self, root: Path, journal_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -457,7 +455,7 @@ class TestHistoryCli:
 class TestUndoCli:
     def test_undo_by_path(self, root: Path, journal_dir: Path) -> None:
         make_file(root, "a.nef")
-        move = family(root, "a", ("a.nef", "b.nef"))
+        move = group(root, "a", ("a.nef", "b.nef"))
         journal = Journal.create(root, (move,), directory=journal_dir)
         assert apply_plan(journal).ok
 
@@ -471,10 +469,10 @@ class TestUndoCli:
         self, root: Path, journal_dir: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         make_file(root, "a.nef")
-        moves = (family(root, "a", ("a.nef", "a2.nef")), family(root, "b", ("b.nef", "b2.nef")))
+        moves = (group(root, "a", ("a.nef", "a2.nef")), group(root, "b", ("b.nef", "b2.nef")))
         journal = Journal.create(root, moves, directory=journal_dir)
         journal.mark_done("a")
-        (root / "a.nef").rename(root / "a2.nef")  # only family a was applied
+        (root / "a.nef").rename(root / "a2.nef")  # only group a was applied
 
         assert main(["undo", str(journal.path), "--json"]) == 0
         payload = json.loads(capsys.readouterr().out)
@@ -485,12 +483,12 @@ class TestUndoCli:
         make_file(root, "a.nef")
         make_file(root, "b.nef")
         moves = (
-            family(root, "a", ("a.nef", "a2.nef")),
-            family(root, "b", ("b.nef", "b2.nef")),
+            group(root, "a", ("a.nef", "a2.nef")),
+            group(root, "b", ("b.nef", "b2.nef")),
         )
         journal = Journal.create(root, moves, directory=journal_dir)
         journal.mark_done("a")
-        (root / "a.nef").rename(root / "a2.nef")  # family a was applied pre-crash
+        (root / "a.nef").rename(root / "a2.nef")  # group a was applied pre-crash
 
         assert main(["resume", str(journal.path)]) == 0
         assert (root / "a2.nef").exists()

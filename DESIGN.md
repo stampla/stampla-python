@@ -20,7 +20,7 @@ Guiding principles, in priority order:
 2. **Derive, don't track.** Names are recomputable from file content and
    metadata at any time. There is no database that can drift out of sync
    with the files.
-3. **Families move as one.** A RAW master and everything that annotates or
+3. **Groups move as one.** A RAW master and everything that annotates or
    derives from it share one name prefix and are renamed atomically.
 
 ## Naming pattern
@@ -89,8 +89,8 @@ This grammar covers the naming behavior of common photo tools:
 
 **The core rename rule: only the prefix ever changes.** Suffix, raw
 extension and extension are always preserved. All files sharing a prefix
-form a *family*; renaming the master means swapping the prefix on every
-family member, atomically.
+form a *group*; renaming the master means swapping the prefix on every
+group member, atomically.
 
 A filename that starts like a known prefix but violates the rest of the
 grammar (stray characters before the extension, uppercase extension,
@@ -106,12 +106,14 @@ formats that matter most (current RAW variants, video containers) are
 exactly where such libraries silently return nothing, and a silently
 missing date is the failure mode `stampla` exists to prevent.
 
-Queries always use `-a` with group-qualified names, because the same tag
-name routinely appears several times in one file with different meanings.
-A video may carry a maker-notes `CreateDate` in local wall-clock time
-*and* a QuickTime `CreateDate` in UTC; without group qualification, which
-one is returned is an accident of tag priority. Downstream logic therefore
-always sees group-qualified tags (`MakerNotes:CreateDate`,
+Queries always use `-a` with tag-group-qualified names (a *tag group*
+is ExifTool's namespace — `MakerNotes`, `QuickTime` — unrelated to the
+file groups above), because the same tag name routinely appears several
+times in one file with different meanings. A video may carry a
+maker-notes `CreateDate` in local wall-clock time *and* a QuickTime
+`CreateDate` in UTC; without the qualifier, which one is returned is an
+accident of tag priority. Downstream logic therefore always sees
+tag-group-qualified names (`MakerNotes:CreateDate`,
 `QuickTime:CreateDate`) and can rank them deliberately.
 
 ## Resolving capture time
@@ -141,23 +143,23 @@ UTC, typically phone videos) converts DST-aware into the configured
 timezone, and the resolution source always carries the marker so reports
 show that a conversion happened.
 
-## Families
+## Groups
 
-All files sharing one name prefix form a family and are renamed as one
+All files sharing one name prefix form a group and are renamed as one
 unit. Because the prefix embeds a content hash, it is unique per master
 across the whole archive — so sidecars kept in subdirectories
-(`NKSC_PARAM/<master>.nksc`) join their master's family with no directory
+(`NKSC_PARAM/<master>.nksc`) join their master's group with no directory
 logic at all.
 
-Within a family, the *master* is the unique member shaped `prefix.ext`
+Within a group, the *master* is the unique member shaped `prefix.ext`
 with a master extension (RAW formats for photo trees, video containers
-for video trees). Some families legitimately have none (an orphan sidecar
+for video trees). Some groups legitimately have none (an orphan sidecar
 whose master was deleted) or several candidates (a RAW plus a DNG
 conversion deliberately named after it). Both are reported rather than
 guessed at structurally; when hashes are available, the true master is
 the candidate whose content matches the prefix, and same-prefix
 conversions behave like derivatives — they inherit the name and are
-re-prefixed with the family.
+re-prefixed with the group.
 
 Files that are not yet named (a memory card during import) group by
 directory and original base name instead: `DSC1234.NEF`, `DSC1234.xmp`
@@ -184,7 +186,7 @@ disagreements:
 | `unresolved-date` | no chain entry yields a capture time — the file can never be auto-named |
 | `collision` | two masters derive the same name, i.e. duplicate content |
 | `ambiguous-master` | several same-prefix master candidates and content settles nothing |
-| `orphan-family` | sidecars whose master is gone |
+| `orphan-group` | sidecars whose master is gone |
 | `malformed` / `unnamed` | inventory of files outside the scheme |
 
 Every bucket also carries a severity — `alarm`, `attention`, `expected`
@@ -198,9 +200,9 @@ token), the same values ride along in a machine-readable `data` object
 in `--json` output — the prose is for people, never the only carrier of
 evidence.
 
-Only the master of each family is hashed and dated — sidecars and
+Only the master of each group is hashed and dated — sidecars and
 derivatives inherit the master's prefix by definition, so their names are
-right exactly when their master's is. Ambiguous families (a RAW plus a
+right exactly when their master's is. Ambiguous groups (a RAW plus a
 conversion carrying the same prefix) are settled by evidence: the
 candidate whose content hash matches the prefix is the master.
 
@@ -226,10 +228,10 @@ reads stdout line by line and never needs a timeout heuristic.
 
 Long operations accept a `Monitor` — a progress callback plus a
 should-cancel probe. Events are per-item where work is long (hashing,
-copying, renaming; one event per file or family) and coarse where it is
+copying, renaming; one event per file or group) and coarse where it is
 batched (date resolution through ExifTool). Cancellation is cooperative
 and only lands at safe points: between files while planning, between
-families while applying — so a cancelled apply is exactly the journal's
+groups while applying — so a cancelled apply is exactly the journal's
 interruption case, finishable with resume or revertable with undo. The
 CLI renders events as a single live line on stderr when it is a
 terminal, and Ctrl-C exits with code 130 and a pointer to resume.
@@ -272,14 +274,14 @@ fixed order:
    at all.
 2. **Write-ahead journal.** The complete plan is persisted to
    `~/.stampla/journals/` — outside the archive — before the first
-   rename. As each family completes, its key is appended to a done-log;
+   rename. As each group completes, its key is appended to a done-log;
    appends are cheap and crash-safe.
-3. **Per-family atomicity.** A family's renames either all happen or the
-   already-done ones are reverted on the spot; a failed family never
-   leaves a master separated from its sidecars. Other families proceed.
-4. **Resume and undo.** Re-running an interrupted journal skips families
+3. **Per-group atomicity.** A group's renames either all happen or the
+   already-done ones are reverted on the spot; a failed group never
+   leaves a master separated from its sidecars. Other groups proceed.
+4. **Resume and undo.** Re-running an interrupted journal skips groups
    already in the done-log. `stampla undo` reverts a journal's done
-   families in reverse order, with the same no-clobber rules.
+   groups in reverse order, with the same no-clobber rules.
 
 Renames never overwrite. An existing target is a refusal and a report,
 not a replacement — duplicate content is a finding for a human, not a
@@ -305,7 +307,7 @@ hash `H₁`, injecting `date_H₁` produces `H₂`, forever.
   The name stays hash-true until the file is first edited — the normal
   mutable-format contract.
 - **Derivatives are never injected.** A DNG or TIFF sharing a RAW's
-  prefix is a family member, renamed by the tool with its master.
+  prefix is a group member, renamed by the tool with its master.
 - **DAM-managed standalone embedded masters accept one generation of
   drift.** The injected name reflects the content just before the token
   write. Once the DAM has renamed the file, name and stored token are

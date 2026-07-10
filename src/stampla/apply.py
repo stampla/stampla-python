@@ -15,10 +15,10 @@ The order of protections:
    instead of being silently replaced; copies claim the final name with
    an exclusive create before the verified data replaces it, and are
    fsynced before they count.
-5. **Per-family atomicity.** A family's renames either all happen or —
+5. **Per-group atomicity.** A group's renames either all happen or —
    if one fails midway — the already-done ones are reverted on the spot.
 6. **Resume and verified undo.** Re-applying a journal skips done
-   families and recognizes families a crash completed but never marked.
+   groups and recognizes groups a crash completed but never marked.
    Undoing a copy journal re-hashes each destination and refuses to
    delete anything that is no longer the copy this run made.
 """
@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stampla.hashing import compute_digests
-from stampla.journal import FamilyMove, Journal, Rename
+from stampla.journal import GroupMove, Journal, Rename
 from stampla.progress import Monitor
 
 
@@ -75,7 +75,7 @@ def archive_lock(root: Path) -> Iterator[None]:
 
 
 def validate_plan(
-    moves: tuple[FamilyMove, ...], root: Path, sources_outside_root: bool = False
+    moves: tuple[GroupMove, ...], root: Path, sources_outside_root: bool = False
 ) -> list[str]:
     """All problems that make the plan unsafe; empty list means go.
 
@@ -92,7 +92,7 @@ def validate_plan(
             problems.append(f"duplicate journal key: {move.key}")
         keys.add(move.key)
         if not move.renames:
-            problems.append(f"{move.key}: empty family move")
+            problems.append(f"{move.key}: empty group move")
         for rename in move.renames:
             checked: tuple[tuple[str, Path], ...] = (
                 ("source", rename.old),
@@ -128,11 +128,11 @@ def validate_plan(
 
 
 def apply_plan(journal: Journal, monitor: Monitor | None = None) -> ApplyResult:
-    """Apply a journaled plan; families already done (or found complete
+    """Apply a journaled plan; groups already done (or found complete
     on disk after a crash) are skipped or recovered, never redone.
 
-    The monitor sees one event per family and can cancel between
-    families — an interruption in the journal's own terms: finish with
+    The monitor sees one event per group and can cancel between
+    groups — an interruption in the journal's own terms: finish with
     resume, or revert with undo.
     """
     monitor = monitor or Monitor()
@@ -141,7 +141,7 @@ def apply_plan(journal: Journal, monitor: Monitor | None = None) -> ApplyResult:
     is_copy = journal.kind == "copy"
     with archive_lock(journal.root):
         for index, move in enumerate(journal.moves):
-            # cancel only between families; done counts completed ones
+            # cancel only between groups; done counts completed ones
             monitor.step(
                 journal.kind,
                 index,
@@ -161,7 +161,7 @@ def apply_plan(journal: Journal, monitor: Monitor | None = None) -> ApplyResult:
                 continue
             error = _containment_error(move, journal.root)
             if error is None:
-                error = _copy_family(move) if is_copy else _apply_family(move)
+                error = _copy_group(move) if is_copy else _apply_group(move)
             if error is None:
                 error = _record_done(journal, move.key)
             if error is None:
@@ -173,7 +173,7 @@ def apply_plan(journal: Journal, monitor: Monitor | None = None) -> ApplyResult:
 
 
 def undo_journal(journal: Journal, monitor: Monitor | None = None) -> ApplyResult:
-    """Revert every done family of a journal, most recent first.
+    """Revert every done group of a journal, most recent first.
 
     Undoing a rename renames back; undoing a copy deletes the copies —
     after verifying each destination still matches the recorded digest,
@@ -196,13 +196,13 @@ def undo_journal(journal: Journal, monitor: Monitor | None = None) -> ApplyResul
             if journal.kind == "copy":
                 error = _delete_copies(move, journal.algorithm)
             else:
-                reverted = FamilyMove(
+                reverted = GroupMove(
                     key=move.key,
                     renames=tuple(
                         Rename(old=rename.new, new=rename.old) for rename in reversed(move.renames)
                     ),
                 )
-                error = _apply_family(reverted)
+                error = _apply_group(reverted)
             if error is None:
                 journal.mark_undone(move.key)
                 result.applied.append(move.key)
@@ -212,7 +212,7 @@ def undo_journal(journal: Journal, monitor: Monitor | None = None) -> ApplyResul
     return result
 
 
-def _containment_error(move: FamilyMove, root: Path) -> str | None:
+def _containment_error(move: GroupMove, root: Path) -> str | None:
     """Re-check at apply time that no target escapes the root.
 
     Plan-time validation resolved these paths once; a directory swapped
@@ -236,8 +236,8 @@ def _record_done(journal: Journal, key: str) -> str | None:
         )
 
 
-def _already_applied(move: FamilyMove, is_copy: bool, algorithm: str) -> bool:
-    """Whether a crash completed this family without marking it done."""
+def _already_applied(move: GroupMove, is_copy: bool, algorithm: str) -> bool:
+    """Whether a crash completed this group without marking it done."""
     for rename in move.renames:
         if not rename.new.is_file():
             return False
@@ -250,8 +250,8 @@ def _already_applied(move: FamilyMove, is_copy: bool, algorithm: str) -> bool:
     return True
 
 
-def _apply_family(move: FamilyMove) -> str | None:
-    """Rename one family all-or-nothing; returns an error message on failure."""
+def _apply_group(move: GroupMove) -> str | None:
+    """Rename one group all-or-nothing; returns an error message on failure."""
     completed: list[tuple[Path, Path]] = []
     for rename in move.renames:
         try:
@@ -263,15 +263,15 @@ def _apply_family(move: FamilyMove) -> str | None:
                 except OSError as rollback_error:
                     return (
                         f"{error}; ROLLBACK ALSO FAILED for {done_new}: {rollback_error}"
-                        " — family is in a mixed state, restore from the journal manually"
+                        " — group is in a mixed state, restore from the journal manually"
                     )
             return str(error)
         completed.append((rename.old, rename.new))
     return None
 
 
-def _copy_family(move: FamilyMove) -> str | None:
-    """Copy one family all-or-nothing; sources are never touched."""
+def _copy_group(move: GroupMove) -> str | None:
+    """Copy one group all-or-nothing; sources are never touched."""
     completed: list[Path] = []
     for rename in move.renames:
         try:
@@ -286,7 +286,7 @@ def _copy_family(move: FamilyMove) -> str | None:
     return None
 
 
-def _delete_copies(move: FamilyMove, algorithm: str) -> str | None:
+def _delete_copies(move: GroupMove, algorithm: str) -> str | None:
     for rename in move.renames:
         if rename.digest is None or not rename.new.is_file():
             continue

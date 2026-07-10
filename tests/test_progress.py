@@ -9,7 +9,7 @@ import pytest
 
 from stampla.apply import apply_plan
 from stampla.hashing import hash_files
-from stampla.journal import FamilyMove, Journal, Rename
+from stampla.journal import GroupMove, Journal, Rename
 from stampla.progress import Cancelled, Monitor, ProgressEvent
 from stampla.verify import run_verify
 
@@ -83,18 +83,18 @@ class TestHashingProgress:
 
 
 class TestApplyProgress:
-    def test_events_per_family_and_cancel_leaves_journal_resumable(self, tmp_path: Path) -> None:
+    def test_events_per_group_and_cancel_leaves_journal_resumable(self, tmp_path: Path) -> None:
         root = tmp_path / "archive"
         root.mkdir()
         for name in ("a.nef", "b.nef"):
             (root / name).write_bytes(name.encode())
         moves = (
-            FamilyMove("a", (Rename(old=root / "a.nef", new=root / "a2.nef"),)),
-            FamilyMove("b", (Rename(old=root / "b.nef", new=root / "b2.nef"),)),
+            GroupMove("a", (Rename(old=root / "a.nef", new=root / "a2.nef"),)),
+            GroupMove("b", (Rename(old=root / "b.nef", new=root / "b2.nef"),)),
         )
         journal = Journal.create(root, moves, directory=tmp_path / "journals")
 
-        # cancel before the second family: the first is applied and journaled
+        # cancel before the second group: the first is applied and journaled
         checks: list[int] = []
 
         def count_and_cancel() -> bool:
@@ -114,11 +114,11 @@ class TestApplyProgress:
         assert result.applied == ["b"]
         assert (root / "b2.nef").exists()
 
-    def test_apply_reports_each_family(self, tmp_path: Path) -> None:
+    def test_apply_reports_each_group(self, tmp_path: Path) -> None:
         root = tmp_path / "archive"
         root.mkdir()
         (root / "a.nef").write_bytes(b"a")
-        moves = (FamilyMove("a", (Rename(old=root / "a.nef", new=root / "a2.nef"),)),)
+        moves = (GroupMove("a", (Rename(old=root / "a.nef", new=root / "a2.nef"),)),)
         journal = Journal.create(root, moves, directory=tmp_path / "journals")
         recorder = Recorder()
         apply_plan(journal, monitor=Monitor(callback=recorder))

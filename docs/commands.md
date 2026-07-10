@@ -30,7 +30,7 @@ with byte-identical content, or is explicitly listed as ignored (hidden
 paths, your `[import]` ignore globs, skipped JPEG twins — review that
 list once; anything you ignore by policy exists only on the card).
 Anything else (unresolvable capture time, a same-name file in the
-archive with *different* content, a family only partially present)
+archive with *different* content, a group only partially present)
 exits 1 and blocks the "safe to format" verdict. Re-running `import`
 after an import is therefore the pre-format check. With `--json` the
 verdict is structural, not just an exit code: the envelope carries
@@ -49,7 +49,7 @@ Recompute every name from metadata and content, and report what disagrees:
 
 ```console
 $ stampla verify --config archive.toml
-scanned 147717 files in 73140 families: 73088 ok, 76 findings
+scanned 147717 files in 73140 groups: 73088 ok, 76 findings
 
 date-mismatch (24):
   Video/2025/2025-06/20250615_140910_388ec696.mov  name says 20250615_140910, metadata says 20250615_160910 (MakerNotes:DateTimeOriginal)
@@ -108,7 +108,7 @@ then rerun.
 
 ## rename
 
-Direct renames, for what no DAM manages: whole families in unmanaged
+Direct renames, for what no DAM manages: whole groups in unmanaged
 trees (fixing a wrong capture date renames the master and every sidecar
 atomically), and — in DAM-managed trees — only the members the DAM does
 not know about, while `inject` handles the master. Also fixes names that
@@ -139,7 +139,7 @@ originating command and status (pending, partial, complete, undone),
 optionally narrowed to one archive with `--config`/`--root`.
 `stampla undo` reverts a run — for imported copies it re-verifies
 each file's digest and refuses to delete anything edited since — and
-`stampla resume` finishes an interrupted one; families already
+`stampla resume` finishes an interrupted one; groups already
 applied are skipped, never redone.
 
 Interrupting any command (Ctrl-C) is safe: planning stops cleanly, and

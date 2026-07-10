@@ -10,7 +10,7 @@ A canonical name decomposes as ``<prefix>[<suffix>][.<raw_ext>].<ext>``:
 - ``ext`` — the file's own extension
 
 Only the prefix ever changes when a file is renamed; suffix, raw extension
-and extension are always preserved. All files sharing a prefix form a family
+and extension are always preserved. All files sharing a prefix form a group
 and are renamed together.
 """
 

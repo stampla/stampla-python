@@ -52,7 +52,7 @@ def findings_of(payload: dict[str, object]) -> list[dict[str, object]]:
     return findings
 
 
-def make_drifted_family(month: Path, capture: str) -> tuple[Path, list[Path]]:
+def make_drifted_group(month: Path, capture: str) -> tuple[Path, list[Path]]:
     """A stale-named master with DAM-unaware members and a plain sidecar."""
     master = make_master(month, capture)
     stale_prefix = master.name.rsplit("_", 1)[0] + "_0ddc0ffe"
@@ -73,10 +73,10 @@ def make_drifted_family(month: Path, capture: str) -> tuple[Path, list[Path]]:
 
 @requires_exiftool
 class TestRenameEndToEnd:
-    def test_whole_family_renamed_outside_dam(self, tmp_path: Path) -> None:
+    def test_whole_group_renamed_outside_dam(self, tmp_path: Path) -> None:
         write_config(tmp_path)
         month = tmp_path / "Photos" / "2026" / "2026-01"
-        stale, _ = make_drifted_family(month, "2026:01:05 12:30:00")
+        stale, _ = make_drifted_group(month, "2026:01:05 12:30:00")
 
         code, payload = run_rename(tmp_path, "--apply")
         assert code == 0, payload
@@ -92,7 +92,7 @@ class TestRenameEndToEnd:
     def test_dam_tree_keeps_master_and_plain_sidecar(self, tmp_path: Path) -> None:
         write_config(tmp_path, '\n[dam]\ntrees = ["Photos"]\n')
         month = tmp_path / "Photos" / "2026" / "2026-02"
-        stale, _ = make_drifted_family(month, "2026:02:05 12:30:00")
+        stale, _ = make_drifted_group(month, "2026:02:05 12:30:00")
 
         code, payload = run_rename(tmp_path, "--apply")
         assert code == 0, payload
@@ -122,7 +122,7 @@ class TestRenameEndToEnd:
     def test_dry_run_is_default_and_touches_nothing(self, tmp_path: Path) -> None:
         write_config(tmp_path)
         month = tmp_path / "Photos" / "2026" / "2026-04"
-        stale, _ = make_drifted_family(month, "2026:04:05 12:30:00")
+        stale, _ = make_drifted_group(month, "2026:04:05 12:30:00")
 
         code, payload = run_rename(tmp_path)
         assert code == 0
@@ -147,7 +147,7 @@ class TestRenameEndToEnd:
         journal_dir = tmp_path / "journals"
         write_config(tmp_path)
         month = tmp_path / "Photos" / "2026" / "2026-06"
-        stale, _ = make_drifted_family(month, "2026:06:05 12:30:00")
+        stale, _ = make_drifted_group(month, "2026:06:05 12:30:00")
 
         import stampla.journal as journal_module
 
@@ -165,7 +165,7 @@ class TestRenameEndToEnd:
     def test_renamed_archive_verifies_clean(self, tmp_path: Path) -> None:
         write_config(tmp_path)
         month = tmp_path / "Photos" / "2026" / "2026-07"
-        make_drifted_family(month, "2026:07:05 12:30:00")
+        make_drifted_group(month, "2026:07:05 12:30:00")
         assert run_rename(tmp_path, "--apply")[0] == 0
 
         buffer = io.StringIO()

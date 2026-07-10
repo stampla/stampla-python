@@ -46,7 +46,7 @@ path = "Photos"
 media = "photo"
 
 # NX Studio keeps sidecars in NKSC_PARAM/ next to the masters;
-# they belong to the master's family and are renamed with it.
+# they belong to the master's group and are renamed with it.
 [[sidecar_dirs]]
 subdir = "NKSC_PARAM"
 strip = ".nksc"

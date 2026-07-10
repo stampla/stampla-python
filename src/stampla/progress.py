@@ -13,7 +13,7 @@ per phase and per batch — events describe motion, not an overall
 percentage.
 
 Cancellation is cooperative and always lands at a safe point: between
-files while planning, between families while applying. An interrupted
+files while planning, between groups while applying. An interrupted
 apply is exactly the journal's interruption case — finish it with the
 resume command, or revert it with undo.
 """

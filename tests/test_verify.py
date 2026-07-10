@@ -138,7 +138,7 @@ class TestVerifyEndToEnd:
         assert by_name[undated.name] == "unresolved-date"
         assert by_name["DSC_1234.jpg"] == "unnamed"
         assert by_name["20260109_070000_0badc0de(1).jpg"] == "malformed"
-        assert by_name["20260110_060000_feedface.xmp"] == "orphan-family"
+        assert by_name["20260110_060000_feedface.xmp"] == "orphan-group"
         summary = payload["summary"]
         assert isinstance(summary, dict)
         assert summary["ok"] == 1

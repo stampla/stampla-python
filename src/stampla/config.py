@@ -26,7 +26,7 @@ _LAYOUT_TOKENS = frozenset({"yyyy", "mm", "dd"})
 # pattern's image_hash is judged by its pixels and never consults this.
 DEFAULT_MUTABLE_EXTENSIONS = frozenset({"dng", "tif", "tiff", "jpg", "jpeg", "psd", "heic", "heif"})
 
-#: photo formats that can be a family's master without a camera RAW
+#: photo formats that can be a group's master without a camera RAW
 #: beside them: plain shots (JPEG, phone HEIC) and standalone DNGs
 LOOSE_MASTER_EXTENSIONS = frozenset({"jpg", "jpeg", "heic", "heif", "dng"})
 
@@ -186,7 +186,7 @@ class Config:
 
     @property
     def photo_master_extensions(self) -> frozenset[str]:
-        """Extensions that can be a photo family's master.
+        """Extensions that can be a photo group's master.
 
         The raw extensions plus the loose masters (JPEG, HEIC, DNG), so
         every photo import accepts stays verifiable, injectable and

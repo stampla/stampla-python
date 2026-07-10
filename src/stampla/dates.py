@@ -1,7 +1,7 @@
 """Capture-time resolution from metadata tags.
 
 A file's capture time is resolved by trying an ordered chain of tag names
-against the group-qualified metadata ExifTool returned. The first entry
+against the tag-group-qualified metadata ExifTool returned. The first entry
 that yields a complete, plausible timestamp wins. A file for which no
 entry matches is *unresolved* — reported, never guessed at, and never
 given a partial date.
@@ -80,7 +80,7 @@ def resolve_date(
     chain: Sequence[str],
     zone: tzinfo | None = None,
 ) -> ResolvedDate | UnresolvedDate:
-    """Resolve a capture time from group-qualified tags using a chain."""
+    """Resolve a capture time from tag-group-qualified tags using a chain."""
     reserved_groups: dict[str, set[str]] = {}
     for raw_entry in chain:
         entry, _ = _split_utc_marker(raw_entry)

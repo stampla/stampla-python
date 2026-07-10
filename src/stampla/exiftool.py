@@ -4,10 +4,10 @@ ExifTool is run as persistent processes (``-stay_open``) so that
 querying thousands of files does not pay its startup cost per file.
 One process is single-threaded Perl, so bulk reads shard the file list
 across a small pool of them; writes stay serialized through the first.
-Metadata is always requested with ``-a`` and group-qualified tag names:
+Metadata is always requested with ``-a`` and tag-group-qualified names:
 several tags with the same name routinely coexist in one file (a
 maker-notes capture time in local wall-clock next to a QuickTime one in
-UTC), and only the group name tells them apart.
+UTC), and only the tag-group name tells them apart.
 """
 
 from __future__ import annotations
@@ -162,11 +162,11 @@ class ExifTool:
         extra_args: Sequence[str] = (),
         group_level: int = 0,
     ) -> dict[Path, dict[str, Any]]:
-        """Read the given tags from many files, keyed by group-qualified name.
+        """Read the given tags from many files, keyed by tag-group-qualified name.
 
-        Group family 0 gives the coarse groups date resolution ranks by
+        ExifTool's family-0 tag groups give the coarse names date resolution ranks by
         (``EXIF``, ``XMP``, ``MakerNotes``, ``QuickTime``); pass a different
-        level for finer group names.
+        level for finer tag-group names.
 
         Files ExifTool cannot read are simply absent from the result; the
         caller decides whether that is an error.

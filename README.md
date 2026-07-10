@@ -24,9 +24,9 @@ usually doesn't have:
 - **Verifiable.** Because the name is reproducible from the file, the
   whole archive can be re-checked at any time: corruption is told apart
   from legitimate edits, and duplicates identify themselves.
-- **Family-safe.** RAW masters travel with their XMP/PP3 sidecars and
-  editor derivatives — everything shares the master's prefix and is
-  renamed together, atomically.
+- **Groups stay whole.** A RAW master, its XMP/PP3 sidecars and its
+  editor derivatives share one name and are renamed together,
+  atomically.
 
 ## Install
 
@@ -43,14 +43,14 @@ dependencies.
 |---|---|
 | `import` | copy a memory card into the archive, named on arrival; exit 0 certifies the card is fully accounted for — safe to format |
 | `verify` | recompute every name and report what disagrees, classified by meaning (corruption vs. expected drift vs. date mismatch) |
-| `rename` | bring stale names in line, atomically per file family |
+| `rename` | bring stale names in line, atomically per file group |
 | `inject` | let a DAM (Lightroom Classic) rename the masters it manages, via a metadata token |
 | `organize` | report-only triage for messy trees: proposals, duplicates, undatable files |
 | `history` / `undo` / `resume` | every apply is journaled: list runs, revert them, finish interrupted ones |
 
 Safety first: every command is a dry run unless `--apply`. Applies are
 validated as a whole before anything is touched, journaled before the
-first change, applied atomically per family, resumable after
+first change, applied atomically per group, resumable after
 interruption and revertable — and a file whose capture time cannot be
 resolved is reported, never renamed. Nothing is ever overwritten.
 

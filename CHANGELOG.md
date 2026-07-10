@@ -17,10 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token, why a card file was ignored), the same values ride along in a
   `data` object in JSON output.
 - Structural verdicts: import's safe-to-format decision, with imported /
-  already-imported / ignored counts, and undo/resume family counts are
+  already-imported / ignored counts, and undo/resume group counts are
   part of the JSON envelope instead of text-only lines.
 - Progress and cancellation: long operations report per-file and
-  per-family progress and can be cancelled at safe points; the CLI shows
+  per-group progress and can be cancelled at safe points; the CLI shows
   a live progress line on a terminal, and Ctrl-C exits cleanly with a
   pointer to `resume`.
 - `history` — list every journaled apply run with its originating
@@ -48,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Lightroom Classic: IPTC Job Identifier) so the DAM renames the masters
   it manages without losing track of them.
 - `rename` — direct renames through a validated, write-ahead-journaled,
-  per-family-atomic engine; whole families outside DAM-managed trees,
+  per-group-atomic engine; whole groups outside DAM-managed trees,
   DAM-unaware members inside them; extension-case fixes.
 - `organize` — report-only triage for messy trees: proposals, duplicate
   clusters, already-archived detection, flagged mtime-dated proposals.

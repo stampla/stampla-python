@@ -1,10 +1,10 @@
 """Write-ahead journal for renames and copies.
 
 Before anything on disk changes, the complete plan is written to a
-journal file outside the archive. As each family completes, its key is
+journal file outside the archive. As each group completes, its key is
 appended to a companion done-log — an append is cheap and crash-safe,
-so a run interrupted at any point can be resumed (already-done families
-are skipped) or undone (done families are reverted in reverse order).
+so a run interrupted at any point can be resumed (already-done groups
+are skipped) or undone (done groups are reverted in reverse order).
 Undoing appends a tombstone line rather than rewriting the log, so the
 log itself can never be truncated by a crash.
 
@@ -35,8 +35,8 @@ class Rename:
 
 
 @dataclass(frozen=True)
-class FamilyMove:
-    """All renames of one family, applied all-or-nothing."""
+class GroupMove:
+    """All renames of one group, applied all-or-nothing."""
 
     key: str
     renames: tuple[Rename, ...]
@@ -53,7 +53,7 @@ class Journal:
         self,
         path: Path,
         root: Path,
-        moves: tuple[FamilyMove, ...],
+        moves: tuple[GroupMove, ...],
         kind: str = "rename",
         algorithm: str = "md5",
         command: str | None = None,
@@ -72,7 +72,7 @@ class Journal:
     def create(
         cls,
         root: Path,
-        moves: tuple[FamilyMove, ...],
+        moves: tuple[GroupMove, ...],
         directory: Path | None = None,
         kind: str = "rename",
         algorithm: str = "md5",
@@ -132,7 +132,7 @@ class Journal:
         with path.open(encoding="utf-8") as stream:
             payload = json.load(stream)
         moves = tuple(
-            FamilyMove(
+            GroupMove(
                 key=entry["key"],
                 renames=tuple(
                     Rename(
@@ -156,7 +156,7 @@ class Journal:
         )
 
     def done_keys(self) -> set[str]:
-        """Applied families: done lines minus their undo tombstones, in order."""
+        """Applied groups: done lines minus their undo tombstones, in order."""
         done: set[str] = set()
         for line in self._log_lines():
             if line.startswith("!"):
@@ -169,7 +169,7 @@ class Journal:
         """Where this run stands: pending, partial, complete or undone.
 
         ``partial`` is the interrupted case resume finishes; ``undone``
-        means families were applied once but every one has since been
+        means groups were applied once but every one has since been
         reverted (tombstoned), as opposed to never applied at all.
         """
         done = self.done_keys()
@@ -188,7 +188,7 @@ class Journal:
             kind=self.kind,
             command=self.command,
             created_at=self.created_at,
-            families=len(self.moves),
+            groups=len(self.moves),
             status=self.status(),
         )
 
@@ -242,7 +242,7 @@ class JournalSummary:
     kind: str
     command: str | None
     created_at: str
-    families: int
+    groups: int
     status: str
 
 

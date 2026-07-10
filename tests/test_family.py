@@ -1,11 +1,11 @@
-"""Tests for family grouping."""
+"""Tests for group grouping."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from stampla.config import SidecarDirRule
-from stampla.family import Family, group_by_prefix, group_originals
+from stampla.group import Group, group_by_prefix, group_originals
 from stampla.naming import DEFAULT_RAW_EXTENSIONS, Grammar
 from stampla.pattern import DEFAULT_PATTERN
 from stampla.scan import FileStatus, ScannedFile
@@ -27,7 +27,7 @@ def scanned(relative: str) -> ScannedFile:
 
 
 class TestGroupByPrefix:
-    def test_full_photo_family_including_cross_directory_sidecar(self) -> None:
+    def test_full_photo_group_including_cross_directory_sidecar(self) -> None:
         files = [
             scanned("2022/2022-05/20220523_192742_d3147a94.nef"),
             scanned("2022/2022-05/20220523_192742_d3147a94.xmp"),
@@ -37,47 +37,47 @@ class TestGroupByPrefix:
             scanned("2022/2022-05/20220523_192742_d3147a94-Edit.tif.pp3"),
             scanned("2022/2022-05/20220524_100000_aaaaaaaa.nef"),
         ]
-        families = group_by_prefix(files)
-        assert [family.prefix for family in families] == [
+        groups = group_by_prefix(files)
+        assert [group.prefix for group in groups] == [
             "20220523_192742_d3147a94",
             "20220524_100000_aaaaaaaa",
         ]
-        assert len(families[0].members) == 6
+        assert len(groups[0].members) == 6
 
     def test_master_identification(self) -> None:
-        family = group_by_prefix(
+        group = group_by_prefix(
             [
                 scanned("a/20220523_192742_d3147a94.nef"),
                 scanned("a/20220523_192742_d3147a94.xmp"),
                 scanned("a/20220523_192742_d3147a94-Edit.tif"),
             ]
         )[0]
-        master = family.master(DEFAULT_RAW_EXTENSIONS)
+        master = group.master(DEFAULT_RAW_EXTENSIONS)
         assert master is not None
         assert master.path.name == "20220523_192742_d3147a94.nef"
 
-    def test_orphan_sidecar_family_has_no_master(self) -> None:
-        family = group_by_prefix([scanned("a/20220523_192742_d3147a94.xmp")])[0]
-        assert family.master(DEFAULT_RAW_EXTENSIONS) is None
+    def test_orphan_sidecar_group_has_no_master(self) -> None:
+        group = group_by_prefix([scanned("a/20220523_192742_d3147a94.xmp")])[0]
+        assert group.master(DEFAULT_RAW_EXTENSIONS) is None
 
     def test_suffixed_derivative_is_not_a_master(self) -> None:
         # A -Edit.tif is a derivative even though tif is a raw extension.
-        family = group_by_prefix([scanned("a/20220523_192742_d3147a94-Edit.tif")])[0]
-        assert family.master(DEFAULT_RAW_EXTENSIONS) is None
+        group = group_by_prefix([scanned("a/20220523_192742_d3147a94-Edit.tif")])[0]
+        assert group.master(DEFAULT_RAW_EXTENSIONS) is None
 
     def test_ambiguous_masters_return_none(self) -> None:
-        family = group_by_prefix(
+        group = group_by_prefix(
             [
                 scanned("a/20220523_192742_d3147a94.nef"),
                 scanned("a/20220523_192742_d3147a94.dng"),
             ]
         )[0]
-        assert family.master(DEFAULT_RAW_EXTENSIONS) is None
-        assert len(family.master_candidates(DEFAULT_RAW_EXTENSIONS)) == 2
+        assert group.master(DEFAULT_RAW_EXTENSIONS) is None
+        assert len(group.master_candidates(DEFAULT_RAW_EXTENSIONS)) == 2
 
     def test_video_master_with_video_extensions(self) -> None:
-        family = group_by_prefix([scanned("v/20210808_145653_941930e9.braw")])[0]
-        master = family.master(VIDEO_EXTENSIONS)
+        group = group_by_prefix([scanned("v/20210808_145653_941930e9.braw")])[0]
+        master = group.master(VIDEO_EXTENSIONS)
         assert master is not None
 
     def test_unnamed_files_are_ignored(self) -> None:
@@ -160,6 +160,6 @@ class TestGroupOriginals:
         assert bases == {"IMG": 1, "IMG_01": 2}
 
 
-def test_family_is_frozen() -> None:
-    family = Family(prefix="20220523_192742_d3147a94", members=())
-    assert family.prefix == "20220523_192742_d3147a94"
+def test_group_is_frozen() -> None:
+    group = Group(prefix="20220523_192742_d3147a94", members=())
+    assert group.prefix == "20220523_192742_d3147a94"

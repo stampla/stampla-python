@@ -2,7 +2,7 @@
 
 Files on the card are grouped by original base name (master plus its
 sidecars and labeled derivatives), the master's capture time and content
-hash produce the family's prefix, and every member is **copied** into
+hash produce the group's prefix, and every member is **copied** into
 the tree's layout directory under its canonical name. Sources on the
 card are never modified or deleted — the card remains the last-resort
 backup until it is formatted in the camera.
@@ -32,9 +32,9 @@ from stampla.dates import (
 )
 from stampla.digests import naming_digests
 from stampla.exiftool import ExifTool
-from stampla.family import OriginalGroup, group_originals
+from stampla.group import CardGroup, group_originals
 from stampla.hashing import compute_digests, hash_files
-from stampla.journal import FamilyMove, Journal, Rename
+from stampla.journal import GroupMove, Journal, Rename
 from stampla.progress import Monitor
 from stampla.report import Bucket, Finding, Report
 
@@ -42,7 +42,7 @@ from stampla.report import Bucket, Finding, Report
 @dataclass
 class ImportPlan:
     algorithm: str
-    moves: tuple[FamilyMove, ...] = ()
+    moves: tuple[GroupMove, ...] = ()
     report: Report = field(default_factory=Report)
     #: expected digest of each copied master at its destination
     expected: dict[Path, str] = field(default_factory=dict)
@@ -134,7 +134,7 @@ def build_plan(
     report.scanned = len(files)
     camera_extensions = config.camera_extensions
     groups = group_originals(files, config.sidecar_dirs, camera_extensions)
-    report.families = len(groups)
+    report.groups = len(groups)
 
     masters: dict[tuple[Path, str], Path] = {}
     for group in groups:
@@ -142,7 +142,7 @@ def build_plan(
         if master is None:
             report.add(
                 Finding(
-                    Bucket.ORPHAN_FAMILY,
+                    Bucket.ORPHAN_GROUP,
                     group.members[0],
                     f"no master in group {group.base!r}; not imported",
                     related=group.members[1:],
@@ -163,7 +163,7 @@ def build_plan(
         )
     digests, hash_errors = hash_files(files, [plan.algorithm], workers=workers, monitor=monitor)
 
-    moves: list[FamilyMove] = []
+    moves: list[GroupMove] = []
     for group in groups:
         master = masters.get((group.directory, group.base))
         if master is None:
@@ -210,7 +210,7 @@ def build_plan(
                 )
         prefix = config.pattern.build_prefix(resolved.value, naming[master])
         destination = root / tree.path / _render_layout(tree.layout, resolved)
-        trimmed = OriginalGroup(directory=group.directory, base=group.base, members=members)
+        trimmed = CardGroup(directory=group.directory, base=group.base, members=members)
         renames = _member_targets(trimmed, prefix, destination)
         if any(rename.new.exists() for rename in renames):
             problems = _compare_with_archive(renames, digests, plan.algorithm)
@@ -240,7 +240,7 @@ def build_plan(
         recorded = tuple(
             Rename(old=r.old, new=r.new, digest=digests[r.old][plan.algorithm]) for r in renames
         )
-        moves.append(FamilyMove(key=prefix, renames=recorded))
+        moves.append(GroupMove(key=prefix, renames=recorded))
         for rename in recorded:
             assert rename.digest is not None
             plan.expected[rename.new] = rename.digest
@@ -354,9 +354,7 @@ def _tree_for(config: Config, media: str) -> Tree | None:
     return next((tree for tree in config.trees if tree.media == media), None)
 
 
-def _master_of(
-    group: OriginalGroup, config: Config, camera_extensions: frozenset[str]
-) -> Path | None:
+def _master_of(group: CardGroup, config: Config, camera_extensions: frozenset[str]) -> Path | None:
     def base_named(member: Path) -> bool:
         return member.name.split(".", 1)[0] == group.base
 
@@ -385,7 +383,7 @@ def _master_of(
     return loose[0] if len(loose) == 1 else None
 
 
-def _member_targets(group: OriginalGroup, prefix: str, destination: Path) -> list[Rename]:
+def _member_targets(group: CardGroup, prefix: str, destination: Path) -> list[Rename]:
     """Where every group member would land in the archive."""
     renames: list[Rename] = []
     for member in group.members:

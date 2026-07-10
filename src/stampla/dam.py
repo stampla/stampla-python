@@ -38,7 +38,7 @@ from stampla.dates import (
 )
 from stampla.digests import naming_digests
 from stampla.exiftool import ExifTool
-from stampla.family import group_by_prefix
+from stampla.group import group_by_prefix
 from stampla.manifest import Manifest
 from stampla.progress import Monitor
 from stampla.report import Bucket, Finding, Report
@@ -112,16 +112,14 @@ def _inject_tree(
     files = list(scan_tree(scan_root, config.grammar, config.excludes))
     monitor.step("scan", len(files), 0)
     report.scanned += len(files)
-    families = group_by_prefix(files)
-    report.families += len(families)
+    groups = group_by_prefix(files)
+    report.groups += len(groups)
 
     master_extensions = config.raw_extensions if tree.media == "photo" else config.video_extensions
     chain = config.date_chain_photo if tree.media == "photo" else config.date_chain_video
 
     masters = [
-        master.path
-        for family in families
-        if (master := family.master(master_extensions)) is not None
+        master.path for group in groups if (master := group.master(master_extensions)) is not None
     ]
     assert config.dam is not None
     token_tag = config.dam.token_tag.partition(":")[2] or config.dam.token_tag
@@ -141,10 +139,10 @@ def _inject_tree(
     )
 
     written_count = 0
-    for family in families:
-        master = family.master(master_extensions)
+    for group in groups:
+        master = group.master(master_extensions)
         if master is None:
-            continue  # orphan/ambiguous families are verify's business
+            continue  # orphan/ambiguous groups are verify's business
         path = master.path
         if path in digest_errors:
             report.add(Finding(Bucket.HASH_ERROR, path, digest_errors[path]))
@@ -159,7 +157,7 @@ def _inject_tree(
             report.add(Finding(Bucket.UNRESOLVED_DATE, path, resolved.reason))
             continue
         derived = config.pattern.build_prefix(resolved.value, digests[path])
-        if derived == family.prefix:
+        if derived == group.prefix:
             report.ok += 1
             continue
 
@@ -168,7 +166,7 @@ def _inject_tree(
             extension in EMBEDDED_TOKEN_EXTENSIONS
             and config.pattern.digest_source_for(extension) == "file"
         ) and _is_converged(
-            family.prefix, derived, metadata[path], token_tag, config.pattern.datetime_length
+            group.prefix, derived, metadata[path], token_tag, config.pattern.datetime_length
         ):
             # Writing the token changed the content, so the name can never
             # equal the current hash for embedded formats. Name == stored

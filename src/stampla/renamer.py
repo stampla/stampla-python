@@ -2,7 +2,7 @@
 
 Renaming splits by who owns the file:
 
-- In trees without DAM management, whole families are renamed to their
+- In trees without DAM management, whole groups are renamed to their
   freshly derived prefix — master and every member, atomically.
 - In DAM-managed trees, the master and its single-extension ``.xmp``
   belong to the DAM (see the inject command); rename touches only the
@@ -15,7 +15,7 @@ A separate pass fixes malformed names that differ from a canonical name
 only by extension case (``.FP2`` → ``.fp2``).
 
 Everything flows through the write-ahead journal: validated as a whole,
-applied per family with rollback, resumable, undoable.
+applied per group with rollback, resumable, undoable.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ from stampla.config import Config, Tree
 from stampla.dates import ResolvedDate, resolve_dates
 from stampla.digests import naming_digests
 from stampla.exiftool import ExifTool
-from stampla.family import Family, group_by_prefix
-from stampla.journal import FamilyMove, Journal, Rename
+from stampla.group import Group, group_by_prefix
+from stampla.journal import GroupMove, Journal, Rename
 from stampla.manifest import Manifest
 from stampla.progress import Monitor
 from stampla.report import Bucket, Finding, Report
@@ -52,13 +52,13 @@ def run_rename(
     paths: tuple[Path, ...] = (),
     options: RenameOptions | None = None,
     monitor: Monitor | None = None,
-) -> tuple[Report, tuple[FamilyMove, ...]]:
+) -> tuple[Report, tuple[GroupMove, ...]]:
     """Plan (and with ``apply``, execute) direct renames under ``root``."""
     options = options or RenameOptions()
     monitor = monitor or Monitor()
     report = Report()
     manifest = Manifest.load(root.resolve()) if options.use_manifest else None
-    moves: list[FamilyMove] = []
+    moves: list[GroupMove] = []
     matched: set[Path] = set()
     with ExifTool(workers=options.workers) as tool:
         for tree in config.trees:
@@ -132,12 +132,12 @@ def _plan_tree(
     report: Report,
     manifest: Manifest | None,
     monitor: Monitor,
-) -> list[FamilyMove]:
+) -> list[GroupMove]:
     files = list(scan_tree(scan_root, config.grammar, config.excludes))
     monitor.step("scan", len(files), 0)
     report.scanned += len(files)
-    families = group_by_prefix(files)
-    report.families += len(families)
+    groups = group_by_prefix(files)
+    report.groups += len(groups)
     dam_managed = config.dam is not None and tree.path in config.dam.trees
 
     if tree.media == "photo":
@@ -149,9 +149,9 @@ def _plan_tree(
 
     chain = config.date_chain_photo if tree.media == "photo" else config.date_chain_video
     masters = {
-        family.prefix: master
-        for family in families
-        if (master := family.master(master_extensions)) is not None
+        group.prefix: master
+        for group in groups
+        if (master := group.master(master_extensions)) is not None
     }
     paths = sorted(master.path for master in masters.values())
     monitor.step("dates", 0, len(paths))
@@ -167,10 +167,10 @@ def _plan_tree(
         monitor=monitor,
     )
 
-    for family in families:
-        master = masters.get(family.prefix)
+    for group in groups:
+        master = masters.get(group.prefix)
         if master is None:
-            continue  # verify reports orphan/ambiguous families
+            continue  # verify reports orphan/ambiguous groups
         path = master.path
         if path in digest_errors:
             report.add(Finding(Bucket.HASH_ERROR, path, digest_errors[path]))
@@ -185,22 +185,22 @@ def _plan_tree(
             report.add(Finding(Bucket.UNRESOLVED_DATE, path, resolved.reason))
             continue
         derived = config.pattern.build_prefix(resolved.value, digests[path])
-        if derived == family.prefix:
+        if derived == group.prefix:
             report.ok += 1
             continue
-        move = _family_move(family, master, derived, dam_managed)
+        move = _group_move(group, master, derived, dam_managed)
         if move is not None:
             moves.append(move)
 
     return moves
 
 
-def _family_move(
-    family: Family, master: ScannedFile, derived: str, dam_managed: bool
-) -> FamilyMove | None:
-    """The renames one family calls for; ``None`` when nothing is ours."""
+def _group_move(
+    group: Group, master: ScannedFile, derived: str, dam_managed: bool
+) -> GroupMove | None:
+    """The renames one group calls for; ``None`` when nothing is ours."""
     renames: list[Rename] = []
-    for member in family.members:
+    for member in group.members:
         if member.parsed is None:
             continue
         if dam_managed and _is_dam_owned(member, master):
@@ -213,7 +213,7 @@ def _family_move(
         )
     if not renames:
         return None
-    return FamilyMove(key=f"{family.prefix}->{derived}", renames=tuple(renames))
+    return GroupMove(key=f"{group.prefix}->{derived}", renames=tuple(renames))
 
 
 def _is_dam_owned(member: ScannedFile, master: ScannedFile) -> bool:
@@ -235,9 +235,9 @@ def _case_fixes(
     config: Config,
     dam_managed: bool,
     master_extensions: frozenset[str],
-) -> list[FamilyMove]:
+) -> list[GroupMove]:
     """Malformed names that become canonical by lowercasing the extensions."""
-    moves: list[FamilyMove] = []
+    moves: list[GroupMove] = []
     for file in files:
         if file.status != FileStatus.MALFORMED:
             continue
@@ -256,7 +256,7 @@ def _case_fixes(
             # renaming it behind the DAM's back breaks the catalog link
             continue
         moves.append(
-            FamilyMove(
+            GroupMove(
                 key=f"case:{file.path}",
                 renames=(Rename(old=file.path, new=file.path.with_name(candidate)),),
             )

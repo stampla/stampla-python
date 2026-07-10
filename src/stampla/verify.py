@@ -1,6 +1,6 @@
 """The verify command: recompute every name and report what disagrees.
 
-For each family, the master's capture time and content hash are
+For each group, the master's capture time and content hash are
 recomputed and the resulting prefix compared with the one on disk.
 The classification distinguishes what a mismatch *means*:
 
@@ -8,7 +8,7 @@ The classification distinguishes what a mismatch *means*:
 - a hash difference on a format that is edited in place is expected drift,
 - a hash difference on an immutable format is a corruption alarm.
 
-Families whose master is structurally ambiguous (a RAW plus a conversion
+Groups whose master is structurally ambiguous (a RAW plus a conversion
 named after it) are settled by evidence: the candidate whose content hash
 matches the prefix is the master, the others are treated as derivatives.
 """
@@ -24,7 +24,7 @@ from stampla.config import Config, Tree
 from stampla.dates import ResolvedDate, UnresolvedDate, resolve_dates
 from stampla.digests import digest_under, naming_digests
 from stampla.exiftool import ExifTool
-from stampla.family import Family, group_by_prefix
+from stampla.group import Group, group_by_prefix
 from stampla.manifest import Manifest
 from stampla.pattern import NamingPattern
 from stampla.progress import Monitor
@@ -125,8 +125,8 @@ def _verify_tree(
                 )
             report.add(Finding(Bucket.UNNAMED, file.path, detail))
 
-    families = group_by_prefix(files)
-    report.families = len(families)
+    groups = group_by_prefix(files)
+    report.groups = len(groups)
 
     if tree.media == "photo":
         master_extensions = config.photo_master_extensions
@@ -137,8 +137,8 @@ def _verify_tree(
 
     candidates = [
         candidate.path
-        for family in families
-        for candidate in family.master_candidates(master_extensions)
+        for group in groups
+        for candidate in group.master_candidates(master_extensions)
     ]
     # date resolution is one ExifTool batch: coarse events around it
     monitor.step("dates", 0, len(candidates))
@@ -160,10 +160,10 @@ def _verify_tree(
         )
 
     derived_owners: dict[str, list[Path]] = defaultdict(list)
-    for family in families:
-        derived = _classify_family(
+    for group in groups:
+        derived = _classify_group(
             report,
-            family,
+            group,
             master_extensions,
             config,
             chain,
@@ -193,9 +193,9 @@ def _verify_tree(
     return report
 
 
-def _classify_family(
+def _classify_group(
     report: Report,
-    family: Family,
+    group: Group,
     master_extensions: frozenset[str],
     config: Config,
     chain: Sequence[str],
@@ -206,15 +206,15 @@ def _classify_family(
     tool: ExifTool,
     manifest: Manifest | None,
 ) -> tuple[str, Path] | None:
-    """Classify one family; returns (derived prefix, master path) if derivable."""
-    candidates = family.master_candidates(master_extensions)
+    """Classify one group; returns (derived prefix, master path) if derivable."""
+    candidates = group.master_candidates(master_extensions)
     if not candidates:
-        members = tuple(member.path for member in family.members)
+        members = tuple(member.path for member in group.members)
         report.add(
             Finding(
-                Bucket.ORPHAN_FAMILY,
+                Bucket.ORPHAN_GROUP,
                 members[0],
-                f"{len(members)} file(s) share prefix {family.prefix} but none is a master",
+                f"{len(members)} file(s) share prefix {group.prefix} but none is a master",
                 related=members[1:],
             )
         )
@@ -222,7 +222,7 @@ def _classify_family(
 
     pattern = config.pattern
     if len(candidates) > 1:
-        master = _master_by_hash(family, candidates, pattern, digests)
+        master = _master_by_hash(group, candidates, pattern, digests)
         if master is None:
             names = ", ".join(candidate.path.name for candidate in candidates)
             detail = f"{len(candidates)} master candidates ({names})" + (
@@ -245,7 +245,7 @@ def _classify_family(
         report.add(Finding(Bucket.UNRESOLVED_DATE, path, resolved.reason))
         return None
 
-    actual_prefix = family.prefix
+    actual_prefix = group.prefix
     named_pattern = master.parsed.pattern if master.parsed else pattern
     if named_pattern.datetime_of(actual_prefix) != resolved.value:
         name_datetime = actual_prefix[: named_pattern.datetime_length]
@@ -313,13 +313,13 @@ def _classify_family(
 
 
 def _master_by_hash(
-    family: Family,
+    group: Group,
     candidates: tuple[ScannedFile, ...],
     pattern: NamingPattern,
     digests: Mapping[Path, str],
 ) -> ScannedFile | None:
-    """The candidate whose content hash matches the family prefix, if unique."""
-    expected = pattern.digest_of(family.prefix)
+    """The candidate whose content hash matches the group prefix, if unique."""
+    expected = pattern.digest_of(group.prefix)
     matching = [
         candidate
         for candidate in candidates

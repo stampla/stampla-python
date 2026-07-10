@@ -16,7 +16,7 @@ from stampla.config import Config, ConfigError, load_config
 from stampla.dam import InjectOptions, run_inject
 from stampla.exiftool import ExifToolError
 from stampla.importer import ImportVerdict, apply_import, build_plan, verdict_of
-from stampla.journal import FamilyMove, Journal, journal_summaries, list_journals
+from stampla.journal import GroupMove, Journal, journal_summaries, list_journals
 from stampla.organize import run_organize
 from stampla.progress import Monitor, ProgressEvent
 from stampla.renamer import RenameOptions, run_rename
@@ -252,7 +252,7 @@ def _emit(
     args: argparse.Namespace,
     command: str,
     report: Report,
-    plan: tuple[FamilyMove, ...] = (),
+    plan: tuple[GroupMove, ...] = (),
     applied: bool | None = None,
     text_extra: list[str] | None = None,
     verdict: ImportVerdict | None = None,
@@ -265,7 +265,7 @@ def _emit(
     findings, hints, plan, verdict, result}``. ``applied`` is null for
     read-only commands, ``verdict`` is import's safe-to-format decision
     (null elsewhere and on dry runs), ``result`` counts a journaled
-    run's families (undo and resume). The archive root is stated once
+    run's groups (undo and resume). The archive root is stated once
     and every path under it is root-relative; paths outside it (card
     files) stay absolute. Text output prints the plan (dry runs), the
     report, then any command-specific lines.
@@ -357,7 +357,7 @@ def _run_history_command(args: argparse.Namespace) -> int:
                     "kind": s.kind,
                     "command": s.command,
                     "created_at": s.created_at,
-                    "families": s.families,
+                    "groups": s.groups,
                     "status": s.status,
                 }
                 for s in summaries
@@ -370,7 +370,7 @@ def _run_history_command(args: argparse.Namespace) -> int:
         return 0
     for s in summaries:
         origin = s.command or s.kind
-        print(f"{s.path}  {s.created_at}  {origin}  {s.status}  {s.families} family(ies)  {s.root}")
+        print(f"{s.path}  {s.created_at}  {origin}  {s.status}  {s.groups} group(s)  {s.root}")
     return 0
 
 
@@ -402,7 +402,7 @@ def _run_undo_command(args: argparse.Namespace) -> int:
         plan=journal.moves,
         applied=True,
         text_extra=[
-            f"\nundo {journal_path.name}: {len(result.applied)} family(ies) reverted,"
+            f"\nundo {journal_path.name}: {len(result.applied)} group(s) reverted,"
             f" {len(result.skipped)} not applied, {len(result.failed)} failed"
         ],
         result=result,
@@ -426,7 +426,7 @@ def _run_resume_command(args: argparse.Namespace) -> int:
         plan=journal.moves,
         applied=True,
         text_extra=[
-            f"\nresume {args.journal.name}: {len(result.applied)} family(ies) applied,"
+            f"\nresume {args.journal.name}: {len(result.applied)} group(s) applied,"
             f" {len(result.skipped)} already done, {len(result.failed)} failed"
         ],
         result=result,
@@ -437,8 +437,7 @@ def _run_resume_command(args: argparse.Namespace) -> int:
 
 def _print_journal_header(action: str, journal: Journal) -> None:
     print(
-        f"{action}: {journal.kind} journal with {len(journal.moves)} family(ies)"
-        f" under {journal.root}",
+        f"{action}: {journal.kind} journal with {len(journal.moves)} group(s) under {journal.root}",
         file=sys.stderr,
     )
 

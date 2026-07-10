@@ -86,7 +86,7 @@ class TestImportEndToEnd:
         assert payload["verdict"] is None  # a dry run never judges the card
         assert not (archive / "Photos").exists()
 
-    def test_apply_copies_family_under_canonical_names(self, archive: Path, tmp_path: Path) -> None:
+    def test_apply_copies_group_under_canonical_names(self, archive: Path, tmp_path: Path) -> None:
         card = tmp_path / "card"
         photo = make_card_photo(card, "DSC_1234", "2026:07:01 10:00:00")
         (card / "DSC_1234.xmp").write_text("<x:xmpmeta/>")
@@ -200,7 +200,7 @@ class TestImportEndToEnd:
         assert verdict["safe_to_format"] is False
         assert verdict["imported"] == 0
 
-    def test_partially_imported_family_is_a_collision(self, archive: Path, tmp_path: Path) -> None:
+    def test_partially_imported_group_is_a_collision(self, archive: Path, tmp_path: Path) -> None:
         card = tmp_path / "card"
         make_card_photo(card, "DSC_1234", "2026:07:01 10:00:00")
         (card / "DSC_1234.xmp").write_text("<x:xmpmeta/>")
@@ -254,7 +254,7 @@ class TestImportEndToEnd:
         assert code == 1
         findings = payload["findings"]
         assert isinstance(findings, list)
-        assert findings[0]["bucket"] == "orphan-family"
+        assert findings[0]["bucket"] == "orphan-group"
 
     def test_imported_archive_verifies_clean(self, archive: Path, tmp_path: Path) -> None:
         card = tmp_path / "card"

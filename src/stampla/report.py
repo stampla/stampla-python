@@ -45,7 +45,7 @@ class Bucket(Enum):
     COLLISION = "collision"
     MALFORMED = "malformed"
     UNNAMED = "unnamed"
-    ORPHAN_FAMILY = "orphan-family"
+    ORPHAN_GROUP = "orphan-group"
     AMBIGUOUS_MASTER = "ambiguous-master"
     METADATA_UNREADABLE = "metadata-unreadable"
     HASH_ERROR = "hash-error"
@@ -75,7 +75,7 @@ _SEVERITIES = {
     Bucket.UNRESOLVED_DATE: Severity.ATTENTION,
     Bucket.COLLISION: Severity.ATTENTION,
     Bucket.AMBIGUOUS_MASTER: Severity.ATTENTION,
-    Bucket.ORPHAN_FAMILY: Severity.ATTENTION,
+    Bucket.ORPHAN_GROUP: Severity.ATTENTION,
     Bucket.NEEDS_SIDECAR: Severity.ATTENTION,
     Bucket.OTHER_PATTERN: Severity.ATTENTION,
     Bucket.MTIME_DATED: Severity.ATTENTION,
@@ -106,7 +106,7 @@ BUCKET_ORDER = (
     Bucket.UNRESOLVED_DATE,
     Bucket.COLLISION,
     Bucket.AMBIGUOUS_MASTER,
-    Bucket.ORPHAN_FAMILY,
+    Bucket.ORPHAN_GROUP,
     Bucket.NEEDS_SIDECAR,
     Bucket.OTHER_PATTERN,
     Bucket.MTIME_DATED,
@@ -139,7 +139,7 @@ class Report:
     findings: list[Finding] = field(default_factory=list)
     ok: int = 0
     scanned: int = 0
-    families: int = 0
+    groups: int = 0
     #: informational lines that never affect the exit code
     hints: list[str] = field(default_factory=list)
 
@@ -150,7 +150,7 @@ class Report:
         self.findings.extend(other.findings)
         self.ok += other.ok
         self.scanned += other.scanned
-        self.families += other.families
+        self.groups += other.groups
         self.hints.extend(other.hints)
 
     @property
@@ -184,7 +184,7 @@ class Report:
         payload = {
             "summary": {
                 "scanned": self.scanned,
-                "families": self.families,
+                "groups": self.groups,
                 "ok": self.ok,
                 "buckets": self.counts(),
             },
@@ -205,7 +205,7 @@ class Report:
 
     def render_text(self) -> str:
         lines = [
-            f"scanned {self.scanned} files in {self.families} families: "
+            f"scanned {self.scanned} files in {self.groups} groups: "
             f"{self.ok} ok, {len(self.findings)} findings"
         ]
         by_bucket: dict[Bucket, list[Finding]] = {}

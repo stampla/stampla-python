@@ -1,11 +1,11 @@
-"""Grouping files into families that are renamed as one unit.
+"""Grouping files into groups that are renamed as one unit.
 
 Two grouping regimes exist:
 
 - **Named files** group by their name prefix. Prefixes embed a content
   hash, so they are unique per master across the whole archive — sidecars
   kept in subdirectories (``NKSC_PARAM/<master>.nksc``) fall into their
-  master's family with no directory logic at all.
+  master's group with no directory logic at all.
 
 - **Card originals** (files not yet named) group by directory and original
   base name: ``DSC1234.NEF``, ``DSC1234.xmp`` and ``DSC1234.NEF.xmp``
@@ -32,7 +32,7 @@ from stampla.scan import ScannedFile
 
 
 @dataclass(frozen=True)
-class Family:
+class Group:
     """All named files sharing one prefix."""
 
     prefix: str
@@ -54,20 +54,20 @@ class Family:
         return candidates[0] if len(candidates) == 1 else None
 
 
-def group_by_prefix(files: Iterable[ScannedFile]) -> list[Family]:
-    """Group named files into families; unnamed/malformed files are ignored."""
+def group_by_prefix(files: Iterable[ScannedFile]) -> list[Group]:
+    """Group named files into groups; unnamed/malformed files are ignored."""
     by_prefix: dict[str, list[ScannedFile]] = defaultdict(list)
     for file in files:
         if file.parsed is not None:
             by_prefix[file.parsed.prefix].append(file)
     return [
-        Family(prefix=prefix, members=tuple(members))
+        Group(prefix=prefix, members=tuple(members))
         for prefix, members in sorted(by_prefix.items())
     ]
 
 
 @dataclass(frozen=True)
-class OriginalGroup:
+class CardGroup:
     """Files sharing one original (pre-import) base name in one directory."""
 
     directory: Path
@@ -79,7 +79,7 @@ def group_originals(
     paths: Iterable[Path],
     sidecar_dirs: Sequence[SidecarDirRule] = (),
     master_extensions: frozenset[str] = frozenset(),
-) -> list[OriginalGroup]:
+) -> list[CardGroup]:
     """Group not-yet-named files by directory and original base name."""
     groups: dict[tuple[Path, str], list[Path]] = defaultdict(list)
     for path in paths:
@@ -96,7 +96,7 @@ def group_originals(
         merged.setdefault(target, []).extend(groups[key])
 
     return [
-        OriginalGroup(directory=directory, base=base, members=tuple(sorted(members)))
+        CardGroup(directory=directory, base=base, members=tuple(sorted(members)))
         for (directory, base), members in sorted(
             merged.items(), key=lambda item: (str(item[0][0]), item[0][1])
         )
