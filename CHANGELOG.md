@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Renamed the central concept: files sharing a name prefix form a
+  *group* (previously *family*). User-facing output, documentation and
+  the API follow (`Group`, `GroupMove`, `stampla.group`); in JSON
+  output the `orphan-family` bucket is now `orphan-group` and the
+  summary key `families` is now `groups`. ExifTool's namespaces are
+  always spelled out as *tag groups* to keep the two apart.
+
 ## [0.1.0] - 2026-07-09
 
 ### Added
