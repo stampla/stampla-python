@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   let event photographers file by job — one predictable normalization
   rule, refusal to guess, and the shoot lives in the directory so
   names and verification are untouched (docs/shoots.md).
+- `misplaced` verify bucket — a group whose name-derived layout folder
+  is not where it sits is reported, so a layout change or a hand-move
+  gone wrong surfaces alongside naming drift.
+- `relocate` — move whole groups to the folder their name belongs in,
+  through the same validated, journaled, undoable engine as `rename`.
+  DAM-managed trees get a catalog-safe checklist (Lightroom Classic:
+  the Folders panel) instead of a move; a group misplaced around a
+  non-derivable `{shoot}` segment is reported but left to move by hand.
 
 ## [0.3.0] - 2026-07-11
 
