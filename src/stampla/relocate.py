@@ -86,18 +86,18 @@ def run_relocate(
             if expected.matches(actual):
                 report.ok += 1
                 continue
-            report.add(
-                Finding(
-                    Bucket.MISPLACED,
-                    home,
-                    f"sits in {actual}/ but its name belongs in {expected}/",
-                    data={"actual": str(actual), "expected": str(expected)},
-                )
+            misplaced = Finding(
+                Bucket.MISPLACED,
+                home,
+                f"sits in {actual}/ but its name belongs in {expected}/",
+                data={"actual": str(actual), "expected": str(expected)},
             )
             if dam_managed:
+                report.add(misplaced)
                 checklist[(str(actual), str(expected))] += 1
                 continue
             if not expected.derivable:
+                report.add(misplaced)
                 shoot_trees_hit.add(tree.path)
                 continue
             target_dir = tree_root / expected.path()
@@ -107,6 +107,7 @@ def run_relocate(
             )
             if len({rename.new for rename in renames}) != len(renames):
                 # one prefix, several homes: merging them would collide
+                report.add(misplaced)
                 report.add(
                     Finding(
                         Bucket.COLLISION,
@@ -116,6 +117,10 @@ def run_relocate(
                     )
                 )
                 continue
+            if not options.apply:
+                # on apply the outcome speaks instead: relocated, or a
+                # loud apply-failed — a fixed misplacement is not a finding
+                report.add(misplaced)
             moves.append(GroupMove(key=group.prefix, renames=renames))
 
     for (from_dir, to_dir), count in sorted(checklist.items()):

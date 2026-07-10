@@ -70,10 +70,10 @@ class TestRelocate:
         master, sidecars = make_group(wrong, "20260105_123000_deadbeef")
 
         code, payload = run_relocate_cli(tmp_path, "--apply")
-        # the misplacement is still recorded (attention), plus the move
-        assert code == 1, payload
+        # a fixed misplacement is not a finding: the outcome speaks instead
+        assert code == 0, payload
         assert buckets_of(payload).count("relocated") == 1
-        assert buckets_of(payload).count("misplaced") == 1
+        assert buckets_of(payload).count("misplaced") == 0
         right = tmp_path / "Photos" / "2026" / "2026-01"
         assert (right / master.name).exists()
         assert (right / sidecars[0].name).exists()
