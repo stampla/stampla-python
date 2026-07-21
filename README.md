@@ -5,7 +5,7 @@
 
 Deterministic, verifiable naming for photo and video archives.
 
-`stampla` renames every photo and video to an identity derived
+`stampla` stamps every photo and video with an identity derived
 purely from the file itself — the capture time plus a slice of the
 content hash:
 
@@ -18,7 +18,7 @@ content hash:
 That name is a stable, unique identifier with properties a filename
 usually doesn't have:
 
-- **Chronological by construction.** Sorting by name is sorting by
+- **Everything on one timeline.** Sorting by name is sorting by
   capture time, across every camera, phone and scanner — no rolling
   counters, no `IMG_0001 (2).jpg`.
 - **Verifiable.** Because the name is reproducible from the file, the
