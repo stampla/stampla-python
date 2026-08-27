@@ -5,6 +5,57 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Unreadable directories are alarms everywhere, never silence: an
+  import scan that cannot list part of the card reports it and
+  withholds "safe to format", and verify/rename/relocate/inject report
+  every subtree they could not examine (new `scan-error` bucket)
+  instead of counting the archive clean without it.
+- A crash or Ctrl-C mid-group no longer wedges the run: resume
+  recognizes and completes half-renamed groups (interrupted hard-link
+  claims included), reclaims a copy's leftover zero-byte claim and
+  scratch files, and undo reverts the renames a crash completed in a
+  never-marked group instead of skipping them.
+- Every copy is digest-verified at its destination before its group
+  counts as done — on resume exactly as in a full import run.
+- Undo of an import refuses, loudly, when copied files have since been
+  renamed away, instead of reporting groups "reverted" while the files
+  live on.
+- Plans with two targets differing only by case are refused up front —
+  they would half-apply on APFS or exFAT.
+- A case-broken sidecar (`.XMP` off a FAT card) now moves *with* its
+  group when the group is renamed, instead of being fixed under the
+  old prefix and split from its master.
+- One grammar-valid but impossible date in a filename (February 31st)
+  is a `malformed` finding for that file, not a crash of the whole
+  verify run; the same for a group whose members sit in more than one
+  directory during relocate.
+- Duplicate content on a card (in-camera copies, recovery dumps)
+  imports once and reports the duplicates, instead of aborting the
+  entire card.
+- inject covers JPEG- and HEIC-mastered groups in DAM trees, matching
+  what verify and rename already treated as masters.
+- Filenames containing newlines are refused as alarms — they cannot
+  cross the ExifTool batch protocol safely — and the protocol layer
+  independently refuses to send them.
+- When verify's only date evidence is the filename itself
+  (`File:NameTimestamp` in the chain), the date is reported as
+  unverifiable rather than silently "ok" by comparing the name with
+  itself.
+- Corrupt journals fail by name from resume/undo/history instead of a
+  raw traceback, and history says when journals were skipped as
+  unreadable.
+
+### Changed
+
+- Manifest entries older than 180 days are re-derived rather than
+  trusted, entries are recorded under the stat taken before hashing,
+  and verify states how many answers came from cache and that sidecars
+  are not content-verified.
+
 ## [0.4.0] - 2026-07-11
 
 ### Added

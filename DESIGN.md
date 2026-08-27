@@ -271,9 +271,12 @@ Design choices, deliberately boring:
   unparsable rows, so columns can be appended without a migration; the
   worst case is a re-hash.
 - **Honest trust boundary.** The cache cannot detect corruption that
-  preserves both size and mtime. `--full` bypasses it entirely and should
-  be run periodically; the manifest makes the *routine* case fast, it
-  does not replace the deep check.
+  preserves both size and mtime — so no entry is trusted forever: after
+  180 days a cached value is re-derived rather than served, and every
+  run states how many answers came from cache. Entries are recorded
+  under the stat taken *before* hashing, so a file changing mid-run
+  invalidates rather than poisons its entry. `--full` still bypasses
+  the cache entirely for an immediate deep check.
 
 ## Renaming safely
 
