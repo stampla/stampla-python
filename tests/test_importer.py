@@ -525,6 +525,8 @@ class TestScanSafety:
         assert "do not format" in str(finding["detail"])
 
     def test_newline_filename_is_an_alarm_not_a_guess(self, archive: Path, tmp_path: Path) -> None:
+        if sys.platform == "win32":
+            pytest.skip("Windows cannot create newline-bearing names at all")
         card = tmp_path / "card"
         make_card_photo(card, "DSC_0001", "2019:06:01 09:00:00")
         weird = card / "DSC\n-AllDates=2000:01:01.JPG"

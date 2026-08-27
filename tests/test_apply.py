@@ -522,7 +522,10 @@ class TestCaseFoldValidation:
             group(root, "a", ("a.nef", "x.nef")),
             group(root, "b", ("b.nef", "X.NEF")),
         )
-        assert any("case-insensitive" in p for p in validate_plan(moves, root))
+        # Windows Path equality already folds case, so the pair trips the
+        # plain duplicate-target check there; elsewhere the folded check
+        problems = validate_plan(moves, root)
+        assert any("case-insensitive" in p or "duplicate target" in p for p in problems)
 
 
 class TestCrashRecovery:

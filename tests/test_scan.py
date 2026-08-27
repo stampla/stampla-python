@@ -124,6 +124,10 @@ class TestScanErrors:
             sealed.chmod(0o755)
 
     def test_newline_names_are_reported_not_yielded(self, tmp_path: Path) -> None:
+        import sys
+
+        if sys.platform == "win32":
+            pytest.skip("Windows cannot create newline-bearing names at all")
         touch(tmp_path, "2026/20260214_125556_1355acb2.nef")
         weird = tmp_path / "2026" / "evil\n-tag.nef"
         weird.touch()
