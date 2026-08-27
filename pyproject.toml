@@ -79,6 +79,7 @@ files = ["src/stampla", "tests"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers"
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 source = ["stampla"]

@@ -12,6 +12,7 @@ UTC), and only the tag-group name tells them apart.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -75,6 +76,13 @@ class _Worker:
         except (OSError, subprocess.TimeoutExpired):
             process.kill()
             process.wait()
+        finally:
+            # close the read pipes rather than leaving them to the
+            # garbage collector (a ResourceWarning under -W error)
+            for pipe in (process.stdout, process.stderr):
+                if pipe is not None:
+                    with contextlib.suppress(OSError):
+                        pipe.close()
 
     def execute(self, *args: str) -> str:
         with self.lock:
