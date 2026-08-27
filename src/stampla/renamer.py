@@ -21,6 +21,8 @@ applied per group with rollback, resumable, undoable.
 from __future__ import annotations
 
 import sys
+from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,8 +34,9 @@ from stampla.exiftool import ExifTool
 from stampla.group import Group, group_by_prefix
 from stampla.journal import GroupMove, Journal, Rename
 from stampla.manifest import Manifest
+from stampla.naming import ParsedName
 from stampla.progress import Monitor
-from stampla.report import Bucket, Finding, Report
+from stampla.report import Bucket, Finding, Report, scan_alarm
 from stampla.scan import FileStatus, ScannedFile, scan_tree
 
 
@@ -133,7 +136,7 @@ def _plan_tree(
     manifest: Manifest | None,
     monitor: Monitor,
 ) -> list[GroupMove]:
-    files = list(scan_tree(scan_root, config.grammar, config.excludes))
+    files = list(scan_tree(scan_root, config.grammar, config.excludes, on_error=scan_alarm(report)))
     monitor.step("scan", len(files), 0)
     report.scanned += len(files)
     groups = group_by_prefix(files)
@@ -145,7 +148,15 @@ def _plan_tree(
     else:
         master_extensions = config.video_extensions
 
-    moves = _case_fixes(files, config, dam_managed, master_extensions)
+    # case-broken names join their group's move when that group is being
+    # re-prefixed — fixing them under the old prefix in the same run
+    # would split a sidecar from its master
+    case_candidates = _case_fix_candidates(files, config, dam_managed, master_extensions)
+    case_by_prefix: dict[str, list[tuple[Path, ParsedName]]] = defaultdict(list)
+    for path, parsed in case_candidates:
+        case_by_prefix[parsed.prefix].append((path, parsed))
+    handled_case: set[Path] = set()
+    moves: list[GroupMove] = []
 
     chain = config.date_chain_photo if tree.media == "photo" else config.date_chain_video
     masters = {
@@ -188,17 +199,38 @@ def _plan_tree(
         if derived == group.prefix:
             report.ok += 1
             continue
-        move = _group_move(group, master, derived, dam_managed)
+        extra = case_by_prefix.get(group.prefix, ())
+        move = _group_move(group, master, derived, dam_managed, extra)
         if move is not None:
+            handled_case.update(case_path for case_path, _ in extra)
             moves.append(move)
+
+    # case fixes whose group keeps its prefix (or has none) stand alone
+    for case_path, parsed in case_candidates:
+        if case_path in handled_case:
+            continue
+        moves.append(
+            GroupMove(
+                key=f"case:{case_path}",
+                renames=(Rename(old=case_path, new=case_path.with_name(parsed.rebuild())),),
+            )
+        )
 
     return moves
 
 
 def _group_move(
-    group: Group, master: ScannedFile, derived: str, dam_managed: bool
+    group: Group,
+    master: ScannedFile,
+    derived: str,
+    dam_managed: bool,
+    case_members: Sequence[tuple[Path, ParsedName]] = (),
 ) -> GroupMove | None:
-    """The renames one group calls for; ``None`` when nothing is ours."""
+    """The renames one group calls for; ``None`` when nothing is ours.
+
+    ``case_members`` are the group's case-broken files: they move to the
+    derived prefix in the same atomic group, extension case fixed.
+    """
     renames: list[Rename] = []
     for member in group.members:
         if member.parsed is None:
@@ -211,6 +243,8 @@ def _group_move(
                 new=member.path.with_name(member.parsed.rebuild(derived)),
             )
         )
+    for case_path, parsed in case_members:
+        renames.append(Rename(old=case_path, new=case_path.with_name(parsed.rebuild(derived))))
     if not renames:
         return None
     return GroupMove(key=f"{group.prefix}->{derived}", renames=tuple(renames))
@@ -230,14 +264,14 @@ def _is_dam_owned(member: ScannedFile, master: ScannedFile) -> bool:
     )
 
 
-def _case_fixes(
+def _case_fix_candidates(
     files: list[ScannedFile],
     config: Config,
     dam_managed: bool,
     master_extensions: frozenset[str],
-) -> list[GroupMove]:
+) -> list[tuple[Path, ParsedName]]:
     """Malformed names that become canonical by lowercasing the extensions."""
-    moves: list[GroupMove] = []
+    candidates: list[tuple[Path, ParsedName]] = []
     for file in files:
         if file.status != FileStatus.MALFORMED:
             continue
@@ -255,10 +289,5 @@ def _case_fixes(
             # a case-broken master or its plain sidecar is the DAM's file;
             # renaming it behind the DAM's back breaks the catalog link
             continue
-        moves.append(
-            GroupMove(
-                key=f"case:{file.path}",
-                renames=(Rename(old=file.path, new=file.path.with_name(candidate)),),
-            )
-        )
-    return moves
+        candidates.append((file.path, parsed))
+    return candidates

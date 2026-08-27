@@ -11,6 +11,7 @@ digests via ExifTool. Manifest entries for image digests use the
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from contextlib import suppress
 from pathlib import Path
@@ -45,26 +46,31 @@ def naming_digests(
 
     to_hash = _through_manifest(file_sourced, pattern.digest, manifest, full, digests)
     if to_hash:
+        stats = _pre_stats(to_hash)
         fresh, hash_errors = hash_files(to_hash, [pattern.digest], workers=workers, monitor=monitor)
         errors.update(hash_errors)
         for path, result in fresh.items():
             digests[path] = result[pattern.digest]
-            _record(manifest, path, pattern.digest, result[pattern.digest])
+            _record(manifest, path, pattern.digest, result[pattern.digest], stats.get(path))
 
     image_key = f"{pattern.digest}-image"
     to_hash = _through_manifest(image_sourced, image_key, manifest, full, digests)
     if to_hash:
         # image hashes come back as one ExifTool batch: coarse events
+        stats = _pre_stats(to_hash)
         monitor.step("hash", 0, len(to_hash))
         fresh_hashes = tool.read_image_hashes(to_hash, pattern.digest)
         monitor.step("hash", len(to_hash), len(to_hash))
         for path in to_hash:
             value = fresh_hashes.get(path)
             if value is None:
-                errors[path] = "format has no image data ExifTool can hash"
+                errors[path] = (
+                    "no image-data hash from ExifTool (unsupported format,"
+                    " or the file could not be read)"
+                )
                 continue
             digests[path] = value
-            _record(manifest, path, image_key, value)
+            _record(manifest, path, image_key, value, stats.get(path))
 
     return digests, errors
 
@@ -106,7 +112,24 @@ def _through_manifest(
     return misses
 
 
-def _record(manifest: Manifest | None, path: Path, key: str, digest: str) -> None:
-    if manifest is not None:
-        with suppress(ManifestError):
-            manifest.record(path, key, digest)
+def _record(
+    manifest: Manifest | None,
+    path: Path,
+    key: str,
+    digest: str,
+    stat: os.stat_result | None,
+) -> None:
+    # no pre-computation stat means no safe cache entry: recording a
+    # post-computation stat would vouch for content the hash never saw
+    if manifest is not None and stat is not None:
+        with suppress(ManifestError, OSError):
+            manifest.record(path, key, digest, stat=stat)
+
+
+def _pre_stats(paths: Sequence[Path]) -> dict[Path, os.stat_result]:
+    """Each file's stat *before* it is read — see :meth:`Manifest.record`."""
+    stats: dict[Path, os.stat_result] = {}
+    for path in paths:
+        with suppress(OSError):
+            stats[path] = path.stat()
+    return stats

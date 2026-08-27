@@ -55,8 +55,8 @@ def machine_name() -> str:
     return safe
 
 
-#: cached digests older than this are still trusted, but counted so
-#: commands can suggest a --full pass
+#: cached values older than this are re-derived rather than trusted; a
+#: quiet archive still gets every file re-checked a few times a year
 STALE_AFTER_DAYS = 180
 
 
@@ -68,8 +68,11 @@ class Manifest:
         self.path = root / directory / f"manifest-{machine_name()}.tsv"
         self._entries: dict[tuple[str, str], ManifestEntry] = {}
         self._dirty = False
-        #: lookups served this session from entries older than the bound
-        self.stale_trusted = 0
+        #: lookups served from cache this session / sent back to be recomputed
+        self.hits = 0
+        self.misses = 0
+        #: misses caused purely by the staleness bound (subset of misses)
+        self.stale_refreshed = 0
 
     def __len__(self) -> int:
         return len(self._entries)
@@ -105,24 +108,42 @@ class Manifest:
 
         One file can carry several rows — its naming digest and its
         resolved capture date live under different algorithm labels.
+        An entry older than :data:`STALE_AFTER_DAYS` is a miss: it is
+        re-derived rather than trusted, so mtime-preserving corruption
+        cannot hide behind the cache forever.
         """
         entry = self._entries.get((self._key(path), algorithm))
         if entry is None:
+            self.misses += 1
             return None
         try:
             stat = path.stat()
         except OSError:
+            self.misses += 1
             return None
         if stat.st_size != entry.size or stat.st_mtime_ns != entry.mtime_ns:
+            self.misses += 1
             return None
         if self._is_stale(entry.checked_at):
-            self.stale_trusted += 1
+            self.stale_refreshed += 1
+            self.misses += 1
+            return None
+        self.hits += 1
         return entry.digest
 
-    def record(self, path: Path, algorithm: str, digest: str) -> None:
-        """Store a freshly computed digest with the file's current stat."""
+    def record(
+        self, path: Path, algorithm: str, digest: str, stat: os.stat_result | None = None
+    ) -> None:
+        """Store a freshly computed value under the file's stat.
+
+        Pass the stat taken *before* the computation: recording a
+        post-computation stat would vouch for content the computation
+        never saw if the file changed mid-run, and every later lookup
+        would trust the wrong digest.
+        """
         key = self._key(path)
-        stat = path.stat()
+        if stat is None:
+            stat = path.stat()
         self._entries[key, algorithm] = ManifestEntry(
             size=stat.st_size,
             mtime_ns=stat.st_mtime_ns,

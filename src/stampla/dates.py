@@ -30,8 +30,10 @@ are deliberately ignored; the wall-clock part is the identity.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, tzinfo
 from pathlib import Path
@@ -215,6 +217,12 @@ def resolve_dates(
             misses.append(path)
 
     if misses:
+        # stat before the read: a file changing mid-run must invalidate
+        # the cached resolution, never be vouched for by its new stat
+        pre_stats: dict[Path, os.stat_result] = {}
+        for path in misses:
+            with suppress(OSError):
+                pre_stats[path] = os.stat(path)
         metadata = tool.read_metadata(misses, sorted(chain_tags(chain)))
         augment_with_name_timestamps(metadata, misses)
         for path in misses:
@@ -224,9 +232,9 @@ def resolve_dates(
                 continue
             resolved = resolve_date(tags, chain, zone)
             results[path] = resolved
-            if isinstance(resolved, ResolvedDate) and manifest is not None:
+            if isinstance(resolved, ResolvedDate) and manifest is not None and path in pre_stats:
                 stamp = resolved.value.strftime("%Y:%m:%d %H:%M:%S")
-                manifest.record(path, algorithm, f"{resolved.source} {stamp}")
+                manifest.record(path, algorithm, f"{resolved.source} {stamp}", stat=pre_stats[path])
     return results
 
 

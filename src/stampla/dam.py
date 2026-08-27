@@ -41,7 +41,7 @@ from stampla.exiftool import ExifTool
 from stampla.group import group_by_prefix
 from stampla.manifest import Manifest
 from stampla.progress import Monitor
-from stampla.report import Bucket, Finding, Report
+from stampla.report import Bucket, Finding, Report, scan_alarm
 from stampla.scan import scan_tree
 
 #: formats whose metadata lives inside the file; the token goes there
@@ -109,13 +109,15 @@ def _inject_tree(
     manifest: Manifest | None,
     monitor: Monitor,
 ) -> None:
-    files = list(scan_tree(scan_root, config.grammar, config.excludes))
+    files = list(scan_tree(scan_root, config.grammar, config.excludes, on_error=scan_alarm(report)))
     monitor.step("scan", len(files), 0)
     report.scanned += len(files)
     groups = group_by_prefix(files)
     report.groups += len(groups)
 
-    master_extensions = config.raw_extensions if tree.media == "photo" else config.video_extensions
+    master_extensions = (
+        config.photo_master_extensions if tree.media == "photo" else config.video_extensions
+    )
     chain = config.date_chain_photo if tree.media == "photo" else config.date_chain_video
 
     masters = [

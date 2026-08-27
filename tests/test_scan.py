@@ -87,3 +87,49 @@ class TestScanTree:
 class TestEmptyTree:
     def test_empty_directory(self, tmp_path: Path) -> None:
         assert list(scan_tree(tmp_path, GRAMMAR)) == []
+
+
+class TestScanErrors:
+    def test_unreadable_directory_reaches_the_handler(self, tmp_path: Path) -> None:
+        import sys
+
+        if sys.platform == "win32":
+            pytest.skip("permission bits do not translate")
+        touch(tmp_path, "2026/2026-02/20260214_125556_1355acb2.nef")
+        sealed = tmp_path / "2019"
+        sealed.mkdir()
+        sealed.chmod(0)
+        errors: list[tuple[Path, str]] = []
+        try:
+            files = list(scan_tree(tmp_path, GRAMMAR, on_error=lambda p, m: errors.append((p, m))))
+        finally:
+            sealed.chmod(0o755)
+        assert len(files) == 1
+        assert errors
+        assert errors[0][0] == sealed
+        assert "cannot scan" in errors[0][1]
+
+    def test_unreadable_directory_raises_without_a_handler(self, tmp_path: Path) -> None:
+        import sys
+
+        if sys.platform == "win32":
+            pytest.skip("permission bits do not translate")
+        sealed = tmp_path / "2019"
+        sealed.mkdir()
+        sealed.chmod(0)
+        try:
+            with pytest.raises(PermissionError):
+                list(scan_tree(tmp_path, GRAMMAR))
+        finally:
+            sealed.chmod(0o755)
+
+    def test_newline_names_are_reported_not_yielded(self, tmp_path: Path) -> None:
+        touch(tmp_path, "2026/20260214_125556_1355acb2.nef")
+        weird = tmp_path / "2026" / "evil\n-tag.nef"
+        weird.touch()
+        errors: list[tuple[Path, str]] = []
+        files = list(scan_tree(tmp_path, GRAMMAR, on_error=lambda p, m: errors.append((p, m))))
+        assert [f.path.name for f in files] == ["20260214_125556_1355acb2.nef"]
+        assert errors
+        assert errors[0][0] == weird
+        assert "newline" in errors[0][1]

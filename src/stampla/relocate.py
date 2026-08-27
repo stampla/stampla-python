@@ -34,7 +34,7 @@ from stampla.group import group_by_prefix
 from stampla.journal import GroupMove, Journal, Rename
 from stampla.places import group_placement
 from stampla.progress import Monitor
-from stampla.report import Bucket, Finding, Report
+from stampla.report import Bucket, Finding, Report, scan_alarm
 from stampla.scan import scan_tree, tree_targets
 
 
@@ -69,7 +69,8 @@ def run_relocate(
                 " Classic: drag in the Folders panel), then verify."
             )
         files = []
-        for file in scan_tree(scan_root, config.grammar, config.excludes):
+        errors = scan_alarm(report)
+        for file in scan_tree(scan_root, config.grammar, config.excludes, on_error=errors):
             files.append(file)
             if len(files) % 512 == 0:
                 monitor.step("scan", len(files), 0, file.path)
@@ -99,6 +100,23 @@ def run_relocate(
             if not expected.derivable:
                 report.add(misplaced)
                 shoot_trees_hit.add(tree.path)
+                continue
+            outside = [
+                file.path for file in group.members if not file.path.is_relative_to(home.parent)
+            ]
+            if outside:
+                # one prefix, members under several directories: a stray
+                # copy somewhere else — moving would guess which is real
+                report.add(misplaced)
+                report.add(
+                    Finding(
+                        Bucket.COLLISION,
+                        home,
+                        "group members sit in more than one directory; resolve by"
+                        " hand before relocating",
+                        related=tuple(outside),
+                    )
+                )
                 continue
             target_dir = tree_root / expected.path()
             renames = tuple(

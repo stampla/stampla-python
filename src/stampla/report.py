@@ -24,7 +24,7 @@ exactly the buckets whose severity is ``safe``.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -41,6 +41,7 @@ class Bucket(Enum):
     DATE_MISMATCH = "date-mismatch"
     EDIT_DRIFT = "edit-drift"
     CORRUPTION = "corruption"
+    SCAN_ERROR = "scan-error"
     UNRESOLVED_DATE = "unresolved-date"
     COLLISION = "collision"
     MALFORMED = "malformed"
@@ -73,6 +74,7 @@ _SEVERITIES = {
     Bucket.CORRUPTION: Severity.ALARM,
     Bucket.APPLY_FAILED: Severity.ALARM,
     Bucket.HASH_ERROR: Severity.ALARM,
+    Bucket.SCAN_ERROR: Severity.ALARM,
     Bucket.METADATA_UNREADABLE: Severity.ATTENTION,
     Bucket.DATE_MISMATCH: Severity.ATTENTION,
     Bucket.UNRESOLVED_DATE: Severity.ATTENTION,
@@ -106,6 +108,7 @@ SAFE_BUCKETS = frozenset(bucket for bucket in Bucket if bucket.severity is Sever
 BUCKET_ORDER = (
     Bucket.CORRUPTION,
     Bucket.APPLY_FAILED,
+    Bucket.SCAN_ERROR,
     Bucket.HASH_ERROR,
     Bucket.METADATA_UNREADABLE,
     Bucket.DATE_MISMATCH,
@@ -141,6 +144,18 @@ class Finding:
     #: the detail's values, machine-readable; only set where the prose
     #: carries data worth consuming (never information of its own)
     data: Mapping[str, object] | None = None
+
+
+def scan_alarm(report: Report) -> Callable[[Path, str], None]:
+    """A :func:`stampla.scan.scan_tree` error handler filing alarm findings.
+
+    Files a scan cannot account for must never read as a clean archive.
+    """
+
+    def handler(path: Path, message: str) -> None:
+        report.add(Finding(Bucket.SCAN_ERROR, path, message))
+
+    return handler
 
 
 @dataclass

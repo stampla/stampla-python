@@ -16,9 +16,10 @@ skipped; they never abort the rest of the card.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -118,16 +119,26 @@ def build_plan(
     report = plan.report
 
     files: list[Path] = []
-    for scanned, path in enumerate(sorted(card.rglob("*"))):
+    scanned = 0
+    for path in _walk_card(card, report):
+        scanned += 1
         if scanned % 512 == 0:
             monitor.step("scan", scanned, 0, path)
-        if not path.is_file():
-            continue
         if selection is not None and not any(
             path.resolve().is_relative_to(chosen) for chosen in selection
         ):
             continue
         relative = path.relative_to(card)
+        if "\n" in path.name or "\r" in path.name:
+            report.add(
+                Finding(
+                    Bucket.SCAN_ERROR,
+                    path,
+                    "filename contains a newline; cannot be imported — copy and"
+                    " rename it by hand before formatting",
+                )
+            )
+            continue
         if any(part.startswith(".") for part in relative.parts):
             report.add(Finding(Bucket.IGNORED, path, "hidden path; not imported", data=_HIDDEN))
             continue
@@ -175,6 +186,7 @@ def build_plan(
     digests, hash_errors = hash_files(files, [plan.algorithm], workers=workers, monitor=monitor)
 
     moves: list[GroupMove] = []
+    planned: dict[str, Path] = {}
     for group in groups:
         master = masters.get((group.directory, group.base))
         if master is None:
@@ -248,6 +260,32 @@ def build_plan(
                     )
                 )
             continue
+        earlier = planned.get(prefix)
+        if earlier is not None:
+            # two card files deriving one prefix: an in-camera duplicate
+            # (same bytes, safe to import once) or a true collision
+            if digests[master][plan.algorithm] == digests[earlier][plan.algorithm]:
+                report.add(
+                    Finding(
+                        Bucket.IGNORED,
+                        master,
+                        f"identical to {earlier} elsewhere on the card; imported once",
+                        related=tuple(m for m in members if m != master),
+                        data={**_CARD_DUPLICATE, "duplicate_of": str(earlier)},
+                    )
+                )
+            else:
+                report.add(
+                    Finding(
+                        Bucket.COLLISION,
+                        master,
+                        f"derives the same name as {earlier} but the content"
+                        " differs; not imported — resolve by hand",
+                        related=(earlier,),
+                    )
+                )
+            continue
+        planned[prefix] = master
         recorded = tuple(
             Rename(old=r.old, new=r.new, digest=digests[r.old][plan.algorithm]) for r in renames
         )
@@ -323,6 +361,35 @@ def apply_import(
     return report
 
 
+def _walk_card(card: Path, report: Report) -> Iterator[Path]:
+    """Every file on the card, with unreadable corners *reported*.
+
+    ``rglob`` would swallow a directory that errors mid-listing — a
+    dying card's failure mode — and the files under it would silently
+    fall out of the plan while the verdict still said "safe to format".
+    Every scan-level error must become an alarm finding instead: files
+    the scan cannot account for are exactly the files formatting would
+    destroy.
+    """
+
+    def walk_error(error: OSError) -> None:
+        failed = Path(error.filename) if error.filename else card
+        report.add(
+            Finding(
+                Bucket.SCAN_ERROR,
+                failed,
+                f"cannot scan: {error} — files under it are unaccounted for;"
+                " do not format the card",
+            )
+        )
+
+    for dirpath, dirnames, filenames in os.walk(card, onerror=walk_error):
+        dirnames.sort()
+        directory = Path(dirpath)
+        for name in sorted(filenames):
+            yield directory / name
+
+
 def _selection_roots(card: Path, only: Sequence[Path]) -> list[Path] | None:
     """Resolved selection directories, or ``None`` for the whole card."""
     if not only:
@@ -342,6 +409,7 @@ def _selection_roots(card: Path, only: Sequence[Path]) -> list[Path] | None:
 _HIDDEN = {"reason": "hidden-path"}
 _IGNORE_PATTERN = {"reason": "ignore-pattern"}
 _JPEG_TWIN = {"reason": "jpeg-twin"}
+_CARD_DUPLICATE = {"reason": "card-duplicate"}
 
 
 def _matches(relative: Path, patterns: tuple[str, ...]) -> bool:

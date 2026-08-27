@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stampla.config import Config, Tree
-from stampla.dates import ResolvedDate, UnresolvedDate, resolve_dates
+from stampla.dates import NAME_TIMESTAMP_TAG, ResolvedDate, UnresolvedDate, resolve_dates
 from stampla.digests import digest_under, naming_digests
 from stampla.exiftool import ExifTool
 from stampla.group import Group, group_by_prefix
@@ -29,7 +29,7 @@ from stampla.manifest import Manifest
 from stampla.pattern import NamingPattern
 from stampla.places import group_placement
 from stampla.progress import Monitor
-from stampla.report import Bucket, Finding, Report
+from stampla.report import Bucket, Finding, Report, scan_alarm
 from stampla.scan import FileStatus, ScannedFile, scan_tree, tree_targets
 
 
@@ -59,20 +59,33 @@ def run_verify(
             report.merge(
                 _verify_tree(tool, tree, tree_root, scan_root, config, options, manifest, monitor)
             )
+    report.hints.append(
+        "content checks cover each group's master; sidecars and derivatives"
+        " are grouped and placed but not content-verified"
+    )
     if manifest is not None:
-        if manifest.stale_trusted:
-            report.hints.append(
-                f"{manifest.stale_trusted} cached manifest entr(y/ies) were trusted despite being"
-                " older than 180 days; run with --full for a deep check"
+        if manifest.hits or manifest.misses:
+            line = (
+                f"cache: {manifest.hits} value(s) served from the manifest,"
+                f" {manifest.misses} computed fresh"
             )
+            if manifest.stale_refreshed:
+                line += f" ({manifest.stale_refreshed} re-checked after 180 days)"
+            report.hints.append(line)
         manifest.save()
     return report
 
 
-def _scan_with_monitor(scan_root: Path, config: Config, monitor: Monitor) -> list[ScannedFile]:
-    """Scan a tree, reporting motion (the total is unknown until done)."""
+def _scan_with_monitor(
+    scan_root: Path, config: Config, monitor: Monitor, report: Report
+) -> list[ScannedFile]:
+    """Scan a tree, reporting motion (the total is unknown until done).
+
+    An unlistable directory becomes an alarm finding: files this scan
+    cannot account for must never read as a clean archive.
+    """
     files: list[ScannedFile] = []
-    for file in scan_tree(scan_root, config.grammar, config.excludes):
+    for file in scan_tree(scan_root, config.grammar, config.excludes, on_error=scan_alarm(report)):
         files.append(file)
         if len(files) % 512 == 0:
             monitor.step("scan", len(files), 0, file.path)
@@ -92,7 +105,7 @@ def _verify_tree(
 ) -> Report:
     monitor = monitor or Monitor()
     report = Report()
-    files = _scan_with_monitor(scan_root, config, monitor)
+    files = _scan_with_monitor(scan_root, config, monitor, report)
     report.scanned = len(files)
 
     for file in files:
@@ -254,7 +267,26 @@ def _classify_group(
 
     actual_prefix = group.prefix
     named_pattern = master.parsed.pattern if master.parsed else pattern
-    if named_pattern.datetime_of(actual_prefix) != resolved.value:
+    try:
+        name_value = named_pattern.datetime_of(actual_prefix)
+    except ValueError as error:
+        # grammar-valid but impossible (20260231…): one bad name must
+        # not abort the whole run — report it against its file
+        report.add(Finding(Bucket.MALFORMED, path, f"name encodes an impossible date: {error}"))
+        return None
+    if resolved.source == NAME_TIMESTAMP_TAG and name_value == resolved.value:
+        # the only date evidence is the name itself — the check would be
+        # name == name, which verifies nothing
+        report.add(
+            Finding(
+                Bucket.UNRESOLVED_DATE,
+                path,
+                "capture time resolves only from the filename; no metadata"
+                " source can confirm or contradict it",
+            )
+        )
+        return None
+    if name_value != resolved.value:
         name_datetime = actual_prefix[: named_pattern.datetime_length]
         derived_datetime = resolved.value.strftime(named_pattern.datetime_format)
         report.add(

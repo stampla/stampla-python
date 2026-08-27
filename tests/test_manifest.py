@@ -94,7 +94,12 @@ class TestFormat:
         lines = manifest.path.read_text().splitlines()
         lines[1] = "\t".join(lines[1].split("\t")[:5])
         manifest.path.write_text("\n".join(lines) + "\n")
-        assert Manifest.load(root).lookup(path, "md5") == "abc123"
+        # the row parses (tolerated), but with no checked_at it counts as
+        # stale and is re-derived rather than trusted
+        reloaded = Manifest.load(root)
+        assert len(reloaded) == 1
+        assert reloaded.lookup(path, "md5") is None
+        assert reloaded.stale_refreshed == 1
 
     def test_extra_future_columns_are_tolerated(self, root: Path) -> None:
         path = make_file(root, "a.nef")
@@ -137,7 +142,7 @@ class TestFormat:
         with pytest.raises(ManifestError, match="outside"):
             manifest.lookup(outside, "md5")
 
-    def test_old_trusted_entries_are_counted_stale(self, root: Path) -> None:
+    def test_old_entries_are_refreshed_not_trusted(self, root: Path) -> None:
         path = make_file(root, "a.nef")
         manifest = Manifest.load(root)
         manifest.record(path, "md5", "abc123")
@@ -149,8 +154,30 @@ class TestFormat:
         manifest.path.write_text(aged)
 
         reloaded = Manifest.load(root)
-        assert reloaded.lookup(path, "md5") == "abc123"  # still trusted
-        assert reloaded.stale_trusted == 1  # but counted
+        # a stale entry is a miss: the value is recomputed, so bitrot
+        # that preserves mtime cannot hide behind the cache forever
+        assert reloaded.lookup(path, "md5") is None
+        assert reloaded.stale_refreshed == 1
+        assert reloaded.misses == 1
+        assert reloaded.hits == 0
+
+    def test_lookup_counts_hits_and_misses(self, root: Path) -> None:
+        path = make_file(root, "a.nef")
+        manifest = Manifest.load(root)
+        assert manifest.lookup(path, "md5") is None
+        manifest.record(path, "md5", "abc123")
+        assert manifest.lookup(path, "md5") == "abc123"
+        assert (manifest.hits, manifest.misses) == (1, 1)
+
+    def test_record_uses_the_given_stat(self, root: Path) -> None:
+        # the stat taken before hashing must be what vouches for the
+        # digest: a file changed mid-run then invalidates on next lookup
+        path = make_file(root, "a.nef")
+        before = path.stat()
+        manifest = Manifest.load(root)
+        path.write_bytes(b"changed after the hash was taken")
+        manifest.record(path, "md5", "abc123", stat=before)
+        assert manifest.lookup(path, "md5") is None
 
     def test_tab_in_path_is_rejected(self, root: Path) -> None:
         # No file is created: Windows cannot even represent this name,

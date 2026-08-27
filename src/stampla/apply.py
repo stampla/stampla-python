@@ -29,7 +29,7 @@ import os
 import shutil
 import sys
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -85,6 +85,7 @@ def validate_plan(
     problems: list[str] = []
     sources: set[Path] = set()
     targets: set[Path] = set()
+    folded_targets: dict[str, Path] = {}
     keys: set[str] = set()
     root = root.resolve()
     for move in moves:
@@ -109,6 +110,16 @@ def validate_plan(
             if rename.new in targets:
                 problems.append(f"{move.key}: duplicate target {rename.new}")
             targets.add(rename.new)
+            # archives travel between filesystems, so two targets that
+            # differ only by case must never both be planned: on APFS or
+            # exFAT the second would collide mid-apply
+            folded = str(rename.new).casefold()
+            other = folded_targets.setdefault(folded, rename.new)
+            if other != rename.new:
+                problems.append(
+                    f"{move.key}: target collides with {other} on a"
+                    f" case-insensitive filesystem: {rename.new}"
+                )
             if not rename.old.is_file():
                 problems.append(f"{move.key}: source missing: {rename.old}")
             if rename.new.exists() and not _is_case_only_rename(rename.old, rename.new):
@@ -161,7 +172,7 @@ def apply_plan(journal: Journal, monitor: Monitor | None = None) -> ApplyResult:
                 continue
             error = _containment_error(move, journal.root)
             if error is None:
-                error = _copy_group(move) if is_copy else _apply_group(move)
+                error = _copy_group(move, journal.algorithm) if is_copy else _apply_group(move)
             if error is None:
                 error = _record_done(journal, move.key)
             if error is None:
@@ -191,7 +202,20 @@ def undo_journal(journal: Journal, monitor: Monitor | None = None) -> ApplyResul
                 move.renames[0].new if move.renames else None,
             )
             if move.key not in done:
-                result.skipped.append(move.key)
+                if journal.kind != "copy":
+                    # a crash mid-group leaves renames done but the group
+                    # unmarked; those must be reverted, not skipped — a
+                    # master split from its sidecars is the worst state
+                    # to leave behind while reporting "ok"
+                    undone, error = _revert_partial(move)
+                    if error is not None:
+                        result.failed.append((move.key, error))
+                    elif undone:
+                        result.applied.append(move.key)
+                    else:
+                        result.skipped.append(move.key)
+                else:
+                    result.skipped.append(move.key)
                 continue
             if journal.kind == "copy":
                 error = _delete_copies(move, journal.algorithm)
@@ -250,10 +274,62 @@ def _already_applied(move: GroupMove, is_copy: bool, algorithm: str) -> bool:
     return True
 
 
+def _rename_crash_completed(rename: Rename) -> bool:
+    """Whether an earlier interrupted run already performed this rename.
+
+    Source gone with the target in place is the fingerprint of a rename
+    done before its group could be marked; source and target existing as
+    the *same file* is the window between the hard-link claim and the
+    source unlink, finished here by dropping the leftover source link.
+    Case-only renames are excluded — their two names are one directory
+    entry, so there is no crash window and unlinking would lose the file.
+    """
+    if _is_case_only_rename(rename.old, rename.new):
+        return False
+    try:
+        if not rename.old.exists() and rename.new.is_file():
+            return True
+        if rename.old.exists() and rename.new.exists() and rename.old.samefile(rename.new):
+            os.unlink(rename.old)
+            return True
+    except OSError:
+        return False
+    return False
+
+
+def _revert_partial(move: GroupMove) -> tuple[int, str | None]:
+    """Revert the renames a crash completed in a never-marked group."""
+    undone = 0
+    for rename in reversed(move.renames):
+        if _is_case_only_rename(rename.old, rename.new):
+            continue
+        try:
+            if not rename.old.exists() and rename.new.is_file():
+                _no_clobber_rename(rename.new, rename.old)
+                undone += 1
+            elif rename.old.exists() and rename.new.exists() and rename.old.samefile(rename.new):
+                os.unlink(rename.new)  # drop the leftover hard-link claim
+                undone += 1
+        except OSError as error:
+            return undone, (
+                f"could not revert the partially applied group: {error}"
+                " — finish it with resume instead"
+            )
+    return undone, None
+
+
 def _apply_group(move: GroupMove) -> str | None:
-    """Rename one group all-or-nothing; returns an error message on failure."""
+    """Rename one group all-or-nothing; returns an error message on failure.
+
+    A rename an interrupted run already performed is recognized and
+    carried forward, so resume completes a half-done group instead of
+    failing on its own leftovers.
+    """
     completed: list[tuple[Path, Path]] = []
     for rename in move.renames:
+        if _rename_crash_completed(rename):
+            completed.append((rename.old, rename.new))
+            continue
         try:
             _no_clobber_rename(rename.old, rename.new)
         except OSError as error:
@@ -270,23 +346,59 @@ def _apply_group(move: GroupMove) -> str | None:
     return None
 
 
-def _copy_group(move: GroupMove) -> str | None:
-    """Copy one group all-or-nothing; sources are never touched."""
+def _copy_group(move: GroupMove, algorithm: str) -> str | None:
+    """Copy one group all-or-nothing; sources are never touched.
+
+    Every copy that carries an expected digest is re-hashed at its
+    destination before the group can be marked done — the promise that a
+    transfer error cannot go unnoticed holds on *every* path that copies,
+    resume included, not just a full import run.
+    """
     completed: list[Path] = []
+
+    def fail(message: str) -> str:
+        for copied in reversed(completed):
+            copied.unlink(missing_ok=True)
+        return message
+
     for rename in move.renames:
         try:
             _no_clobber_copy(rename.old, rename.new)
         except OSError as error:
-            for copied in reversed(completed):
-                copied.unlink(missing_ok=True)
-            return str(error)
+            return fail(str(error))
         completed.append(rename.new)
+        if rename.digest is not None:
+            try:
+                actual = compute_digests(rename.new, [algorithm])[algorithm]
+            except OSError as error:
+                return fail(f"cannot verify {rename.new} after copying: {error}")
+            if actual != rename.digest:
+                return fail(
+                    f"{rename.new} does not match the source digest after copying"
+                    " — transfer error; the source is untouched"
+                )
     for directory in {path.parent for path in completed}:
         _fsync_best_effort(directory)
     return None
 
 
 def _delete_copies(move: GroupMove, algorithm: str) -> str | None:
+    missing = [
+        rename.new
+        for rename in move.renames
+        if rename.digest is not None and not rename.new.is_file()
+    ]
+    if missing:
+        # a destination that vanished was almost certainly renamed or
+        # relocated since the import; calling this group "reverted"
+        # while its files live on in the archive would be a lie
+        listed = ", ".join(str(path) for path in missing[:3])
+        if len(missing) > 3:
+            listed += ", …"
+        return (
+            f"{len(missing)} of {len(move.renames)} copied file(s) no longer exist"
+            f" ({listed}) — probably renamed since; undo cannot revert this import"
+        )
     for rename in move.renames:
         if rename.digest is None or not rename.new.is_file():
             continue
@@ -352,10 +464,19 @@ def _no_clobber_copy(old: Path, new: Path) -> None:
     fsynced, and only then replaces the claim.
     """
     new.parent.mkdir(parents=True, exist_ok=True)
+    _drop_stale_scratch(new)
     try:
         os.close(os.open(new, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
     except FileExistsError:
-        raise FileExistsError(f"target already exists: {new}") from None
+        try:
+            existing_size = new.stat().st_size
+        except OSError:
+            existing_size = -1
+        if existing_size != 0:
+            raise FileExistsError(f"target already exists: {new}") from None
+        # a zero-byte file at exactly the target is this tool's own claim
+        # from an interrupted run — the archive lock excludes concurrent
+        # stamplas — so it is reused rather than wedging resume forever
     scratch = new.with_name(f"{new.name}.{os.getpid()}.part")
     try:
         shutil.copy2(old, scratch)
@@ -368,10 +489,29 @@ def _no_clobber_copy(old: Path, new: Path) -> None:
         finally:
             os.close(fd)
         os.replace(scratch, new)
-    except OSError:
+    except BaseException:
+        # BaseException: a Ctrl-C mid-copy must not leak the claim either
         scratch.unlink(missing_ok=True)
-        new.unlink(missing_ok=True)  # remove the empty claim
+        with suppress(OSError):
+            if new.stat().st_size == 0:
+                new.unlink()  # remove the empty claim, never a full copy
         raise
+
+
+def _drop_stale_scratch(new: Path) -> None:
+    """Remove ``<name>.<pid>.part`` leftovers from interrupted runs.
+
+    The archive lock excludes concurrent stamplas, so any scratch file
+    for this target belongs to a run that is no longer alive.
+    """
+    try:
+        siblings = os.listdir(new.parent)
+    except OSError:
+        return
+    for name in siblings:
+        if name.startswith(new.name + ".") and name.endswith(".part"):
+            with suppress(OSError):
+                (new.parent / name).unlink()
 
 
 def _fsync_best_effort(directory: Path) -> None:

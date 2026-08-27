@@ -176,3 +176,44 @@ class TestRenameEndToEnd:
         assert isinstance(summary, dict)
         assert code == 0, payload
         assert summary["ok"] == 1
+
+
+@requires_exiftool
+class TestRenameSafety:
+    def test_case_fix_follows_the_group_rename(self, tmp_path: Path) -> None:
+        write_config(tmp_path)
+        month = tmp_path / "Photos" / "2026" / "2026-01"
+        master = make_master(month, "2026:01:05 12:30:00")
+        stale_prefix = master.name.rsplit("_", 1)[0] + "_0ddc0ffe"
+        stale = month / f"{stale_prefix}.jpg"
+        master.rename(stale)
+        # the sidecar came off a FAT card with its extension upper-cased
+        case_broken = month / f"{stale_prefix}.XMP"
+        case_broken.write_text("<x:xmpmeta/>")
+
+        code, payload = run_rename(tmp_path, "--apply")
+        assert code == 0, payload
+        [renamed_master] = list(month.glob("*.jpg"))
+        derived_prefix = renamed_master.name.rsplit(".", 1)[0]
+        assert derived_prefix != stale_prefix
+        # the case-broken sidecar moved WITH its group, extension fixed —
+        # never left behind under the old prefix
+        assert (month / f"{derived_prefix}.xmp").exists()
+        assert not case_broken.exists()
+        assert not (month / f"{stale_prefix.lower()}.xmp").exists()
+
+    def test_colliding_plan_is_refused_before_anything_moves(self, tmp_path: Path) -> None:
+        write_config(tmp_path)
+        month = tmp_path / "Photos" / "2026" / "2026-01"
+        first = make_master(month, "2026:01:05 12:30:00")
+        stale_a = month / ("20260105_123000_aaaa1111" + ".jpg")
+        first.rename(stale_a)
+        stale_b = month / ("20260105_123000_bbbb2222" + ".jpg")
+        stale_b.write_bytes(stale_a.read_bytes())  # identical twins, both stale
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = main(["rename", "--config", str(tmp_path / "config.toml"), "--apply"])
+        assert code == 2  # refused as a whole
+        assert stale_a.exists()  # nothing touched
+        assert stale_b.exists()

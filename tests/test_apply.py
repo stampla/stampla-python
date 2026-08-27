@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import errno
+import hashlib
 import json
+import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -494,3 +498,247 @@ class TestUndoCli:
         assert (root / "a2.nef").exists()
         assert (root / "b2.nef").exists()
         assert journal.done_keys() == {"a", "b"}
+
+
+def copy_group(root: Path, source_dir: Path, key: str, *names: str) -> GroupMove:
+    renames = []
+    for name in names:
+        source = source_dir / name
+        renames.append(
+            Rename(
+                old=source,
+                new=root / name,
+                digest=hashlib.md5(source.read_bytes()).hexdigest(),
+            )
+        )
+    return GroupMove(key=key, renames=tuple(renames))
+
+
+class TestCaseFoldValidation:
+    def test_targets_differing_only_by_case_are_refused(self, root: Path) -> None:
+        make_file(root, "a.nef")
+        make_file(root, "b.nef")
+        moves = (
+            group(root, "a", ("a.nef", "x.nef")),
+            group(root, "b", ("b.nef", "X.NEF")),
+        )
+        assert any("case-insensitive" in p for p in validate_plan(moves, root))
+
+
+class TestCrashRecovery:
+    def test_resume_completes_a_half_renamed_group(self, root: Path, journal_dir: Path) -> None:
+        make_file(root, "a.nef")
+        make_file(root, "a.xmp")
+        move = group(root, "a", ("a.nef", "b.nef"), ("a.xmp", "b.xmp"))
+        journal = Journal.create(root, (move,), directory=journal_dir)
+        # the crash landed after the first rename, before the second
+        (root / "a.nef").rename(root / "b.nef")
+
+        result = apply_plan(journal)
+        assert result.ok, result.failed
+        assert result.applied == ["a"]
+        assert (root / "b.nef").exists()
+        assert (root / "b.xmp").exists()
+        assert not (root / "a.nef").exists()
+        assert not (root / "a.xmp").exists()
+
+    def test_resume_finishes_an_interrupted_hardlink_claim(
+        self, root: Path, journal_dir: Path
+    ) -> None:
+        make_file(root, "a.nef")
+        move = group(root, "a", ("a.nef", "b.nef"))
+        journal = Journal.create(root, (move,), directory=journal_dir)
+        # the crash landed between the link claim and the source unlink
+        os.link(root / "a.nef", root / "b.nef")
+
+        result = apply_plan(journal)
+        assert result.ok, result.failed
+        assert (root / "b.nef").exists()
+        assert not (root / "a.nef").exists()
+
+    def test_undo_reverts_a_partially_applied_group(self, root: Path, journal_dir: Path) -> None:
+        make_file(root, "a.nef")
+        make_file(root, "a.xmp")
+        move = group(root, "a", ("a.nef", "b.nef"), ("a.xmp", "b.xmp"))
+        journal = Journal.create(root, (move,), directory=journal_dir)
+        (root / "a.nef").rename(root / "b.nef")  # crash mid-group, never marked
+
+        result = undo_journal(journal)
+        assert result.ok, result.failed
+        assert result.applied == ["a"]  # the partial rename was reverted
+        assert (root / "a.nef").exists()
+        assert (root / "a.xmp").exists()
+        assert not (root / "b.nef").exists()
+
+    def test_undo_skips_groups_with_nothing_done(self, root: Path, journal_dir: Path) -> None:
+        make_file(root, "a.nef")
+        move = group(root, "a", ("a.nef", "b.nef"))
+        journal = Journal.create(root, (move,), directory=journal_dir)
+
+        result = undo_journal(journal)
+        assert result.ok
+        assert result.skipped == ["a"]
+        assert (root / "a.nef").exists()
+
+    def test_resume_reclaims_a_zero_byte_claim(self, root: Path, tmp_path: Path) -> None:
+        card = tmp_path / "card"
+        card.mkdir()
+        (card / "a.jpg").write_bytes(b"real image bytes")
+        move = copy_group(root, card, "a", "a.jpg")
+        journal = Journal.create(
+            root, (move,), directory=tmp_path / "journals", kind="copy", algorithm="md5"
+        )
+        # the crash left the exclusive-create claim with no data in it
+        (root / "a.jpg").touch()
+        (root / f"a.jpg.{os.getpid() + 1}.part").write_bytes(b"stale scratch")
+
+        result = apply_plan(journal)
+        assert result.ok, result.failed
+        assert (root / "a.jpg").read_bytes() == b"real image bytes"
+        assert not list(root.glob("*.part"))
+
+    def test_copy_content_is_verified_before_the_group_counts(
+        self, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        card = tmp_path / "card"
+        card.mkdir()
+        (card / "a.jpg").write_bytes(b"real image bytes")
+        move = copy_group(root, card, "a", "a.jpg")
+        journal = Journal.create(
+            root, (move,), directory=tmp_path / "journals", kind="copy", algorithm="md5"
+        )
+
+        real_copy = shutil.copy2
+
+        # same byte count as the source so the size check passes and only
+        # the digest can catch it
+        def same_size_corruption(src: Path, dst: Path) -> Path:
+            real_copy(src, dst)
+            data = bytearray(dst.read_bytes())
+            data[0] ^= 0xFF
+            dst.write_bytes(bytes(data))
+            return dst
+
+        monkeypatch.setattr(shutil, "copy2", same_size_corruption)
+        result = apply_plan(journal)
+        assert not result.ok
+        assert "does not match the source digest" in result.failed[0][1]
+        assert not (root / "a.jpg").exists()  # rolled back, nothing half-kept
+        assert (card / "a.jpg").read_bytes() == b"real image bytes"  # source untouched
+
+    def test_rename_no_clobber_without_hardlinks(
+        self, root: Path, journal_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        make_file(root, "a.nef")
+        make_file(root, "taken.nef")
+        moves = (
+            group(root, "a", ("a.nef", "b.nef")),
+            group(root, "c", ("taken.nef", "a.nef")),
+        )
+
+        def no_links(src: object, dst: object, **kwargs: object) -> None:
+            raise OSError(errno.EPERM, "filesystem does not support hard links")
+
+        monkeypatch.setattr(os, "link", no_links)
+        # plain rename still works and still refuses an existing target
+        journal = Journal.create(root, (moves[0],), directory=journal_dir)
+        result = apply_plan(journal)
+        assert result.ok, result.failed
+        assert (root / "b.nef").exists()
+
+        blocked = GroupMove(
+            key="blocked", renames=(Rename(old=root / "taken.nef", new=root / "b.nef"),)
+        )
+        journal2 = Journal.create(root, (blocked,), directory=journal_dir)
+        result2 = apply_plan(journal2)
+        assert not result2.ok
+        assert "already exists" in result2.failed[0][1]
+        assert (root / "taken.nef").exists()  # rolled back / untouched
+
+    def test_done_log_failure_is_loud_and_resume_self_heals(
+        self, root: Path, journal_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        make_file(root, "a.nef")
+        move = group(root, "a", ("a.nef", "b.nef"))
+        journal = Journal.create(root, (move,), directory=journal_dir)
+
+        def broken_mark(self: Journal, key: str) -> None:
+            raise OSError("done-log write refused")
+
+        monkeypatch.setattr(Journal, "mark_done", broken_mark)
+        result = apply_plan(journal)
+        assert not result.ok
+        assert "could not be recorded" in result.failed[0][1]
+        assert (root / "b.nef").exists()  # applied on disk, said so loudly
+
+        monkeypatch.undo()
+        healed = apply_plan(journal)
+        assert healed.ok, healed.failed
+        assert healed.applied == ["a"]  # recognized as crash-completed
+        assert (root / "b.nef").read_bytes() == b"a.nef"  # never re-renamed
+
+    def test_undo_refuses_when_copy_destinations_vanished(self, root: Path, tmp_path: Path) -> None:
+        card = tmp_path / "card"
+        card.mkdir()
+        (card / "a.jpg").write_bytes(b"first")
+        (card / "b.jpg").write_bytes(b"second")
+        move = copy_group(root, card, "a", "a.jpg", "b.jpg")
+        journal = Journal.create(
+            root, (move,), directory=tmp_path / "journals", kind="copy", algorithm="md5"
+        )
+        assert apply_plan(journal).ok
+        (root / "a.jpg").rename(root / "renamed-since.jpg")  # the canonical fate
+
+        result = undo_journal(journal)
+        assert not result.ok
+        assert "no longer exist" in result.failed[0][1]
+        assert (root / "b.jpg").exists()  # nothing was half-deleted
+
+
+class TestUndoLatest:
+    def test_undo_latest_reverts_the_newest_journal(
+        self, root: Path, journal_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import stampla.journal as journal_module
+
+        monkeypatch.setattr(journal_module, "default_journal_dir", lambda: journal_dir)
+        make_file(root, "a.nef")
+        make_file(root, "b.nef")
+        first = Journal.create(root, (group(root, "a", ("a.nef", "a2.nef")),))
+        assert apply_plan(first).ok
+        second = Journal.create(root, (group(root, "b", ("b.nef", "b2.nef")),))
+        assert apply_plan(second).ok
+
+        assert main(["undo", "--latest"]) == 0
+        assert (root / "b.nef").exists()  # newest run reverted
+        assert (root / "a2.nef").exists()  # older run untouched
+
+    def test_bare_undo_lists_journals(
+        self,
+        root: Path,
+        journal_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        import stampla.journal as journal_module
+
+        monkeypatch.setattr(journal_module, "default_journal_dir", lambda: journal_dir)
+        make_file(root, "a.nef")
+        journal = Journal.create(root, (group(root, "a", ("a.nef", "a2.nef")),))
+        assert main(["undo"]) == 0
+        out = capsys.readouterr()
+        assert str(journal.path) in out.out
+        assert (root / "a.nef").exists()  # listing reverts nothing
+
+
+class TestCorruptJournal:
+    def test_resume_of_a_corrupt_journal_fails_cleanly(
+        self, journal_dir: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        journal_dir.mkdir(parents=True)
+        corrupt = journal_dir / "journal-x.json"
+        corrupt.write_text('{"version": 2, "moves": [{"renames"')
+        assert main(["resume", str(corrupt)]) == 2
+        err = capsys.readouterr().err
+        assert "corrupt or truncated" in err
+        assert "Traceback" not in err

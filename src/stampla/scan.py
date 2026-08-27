@@ -12,7 +12,7 @@ matching directory is pruned without descending into it.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from fnmatch import fnmatchcase
@@ -23,6 +23,9 @@ from stampla.naming import Grammar, ParsedName
 
 if TYPE_CHECKING:
     from stampla.config import Config, Tree
+
+#: called with the unreadable/unusable path and the reason it is excluded
+ScanErrorHandler = Callable[[Path, str], None]
 
 
 class FileStatus(Enum):
@@ -38,9 +41,28 @@ class ScannedFile:
     parsed: ParsedName | None = None
 
 
-def scan_tree(root: Path, grammar: Grammar, excludes: Sequence[str] = ()) -> Iterator[ScannedFile]:
-    """Yield every relevant file under ``root``, deterministically ordered."""
-    for dirpath, dirnames, filenames in os.walk(root):
+def scan_tree(
+    root: Path,
+    grammar: Grammar,
+    excludes: Sequence[str] = (),
+    on_error: ScanErrorHandler | None = None,
+) -> Iterator[ScannedFile]:
+    """Yield every relevant file under ``root``, deterministically ordered.
+
+    A directory that cannot be listed means files exist that this scan
+    cannot account for — silence there would let a permission mishap
+    read as a clean archive. ``on_error`` receives every such path (and
+    every file whose name cannot safely cross a subprocess boundary);
+    without a handler the walk error is raised instead of swallowed.
+    """
+
+    def walk_error(error: OSError) -> None:
+        if on_error is None:
+            raise error
+        failed = Path(error.filename) if error.filename else root
+        on_error(failed, f"cannot scan: {error}")
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=walk_error):
         directory = Path(dirpath)
         rel_dir = directory.relative_to(root)
         dirnames[:] = sorted(
@@ -53,6 +75,14 @@ def scan_tree(root: Path, grammar: Grammar, excludes: Sequence[str] = ()) -> Ite
             if name.startswith("."):
                 continue
             if _excluded((rel_dir / name).as_posix(), name, excludes):
+                continue
+            if "\n" in name or "\r" in name:
+                # a newline-bearing name cannot cross the exiftool
+                # argfile protocol; it is excluded rather than risked
+                message = "filename contains a newline; excluded from every operation"
+                if on_error is None:
+                    raise ValueError(f"{directory / name}: {message}")
+                on_error(directory / name, message)
                 continue
             parsed = grammar.parse(name)
             if parsed is not None:

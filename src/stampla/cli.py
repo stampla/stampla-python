@@ -366,7 +366,10 @@ def _run_history_command(args: argparse.Namespace) -> int:
     elif args.config is not None:
         config = load_config(args.config)
         root = Path(config.root) if config.root else None
-    summaries = journal_summaries(root=root.resolve() if root else None)
+    unreadable: list[Path] = []
+    summaries = journal_summaries(root=root.resolve() if root else None, unreadable=unreadable)
+    for path in unreadable:
+        print(f"stampla: unreadable journal skipped: {path}", file=sys.stderr)
     if args.json:
         payload = {
             "format": 1,

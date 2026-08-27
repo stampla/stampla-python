@@ -224,3 +224,25 @@ class TestInject:
         code, payload = run_inject(archive)
         assert code == 1
         assert findings_of(payload)[0]["bucket"] == "unresolved-date"
+
+
+@requires_exiftool
+class TestJpegMaster:
+    def test_jpeg_master_without_raw_gets_a_token(self, tmp_path: Path) -> None:
+        # jpg is not a raw extension here; a lone JPEG shot is still a
+        # master and must be inject's business, not silently skipped
+        (tmp_path / "config.toml").write_text(
+            CONFIG_TEMPLATE.format(root=str(tmp_path)).replace(
+                'raw = ["jpg", "nef"]', 'raw = ["nef"]'
+            )
+        )
+        month = tmp_path / "Photos" / "2026" / "2026-01"
+        master = make_master(month, "2026:01:05 12:30:00")
+        stale = month / (master.name.rsplit("_", 1)[0] + "_0ddc0ffe.jpg")
+        master.rename(stale)  # name drifted: the token has work to do
+
+        code, payload = run_inject(tmp_path)
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        assert code == 0, payload
+        assert [f["bucket"] for f in findings] == ["token-pending"]

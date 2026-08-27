@@ -83,6 +83,12 @@ class _Worker:
             assert process.stdout is not None
             self.sequence += 1
             marker = f"{{ready{self.sequence}}}"
+            for arg in args:
+                if "\n" in arg or "\r" in arg:
+                    # the -stay_open protocol is one argument per line; a
+                    # newline inside an argument would smuggle extra
+                    # arguments (including tag writes) into the batch
+                    raise ExifToolError(f"argument contains a newline; refusing: {arg!r}")
             payload = "".join(f"{arg}\n" for arg in args) + f"-execute{self.sequence}\n"
             try:
                 process.stdin.write(payload.encode("utf-8"))

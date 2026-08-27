@@ -209,3 +209,23 @@ class TestVerifyReportsMisplaced:
         assert code == 1
         buckets = [str(f["bucket"]) for f in payload["findings"]]
         assert "misplaced" in buckets
+
+
+class TestMultiHomeGroups:
+    def test_same_prefix_in_two_places_is_a_collision(self, tmp_path: Path) -> None:
+        write_config(tmp_path)
+        wrong = tmp_path / "Photos" / "2027" / "2027-01"
+        make_group(wrong, "20260101_120000_aaaaaaaa")
+        stray_dir = tmp_path / "Photos" / "2026" / "2026-03"
+        stray_dir.mkdir(parents=True)
+        (stray_dir / "20260101_120000_aaaaaaaa.jpg").write_bytes(b"stray copy")
+
+        code, payload = run_relocate_cli(tmp_path, "--apply")
+        assert code == 1
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        [collision] = [f for f in findings if f["bucket"] == "collision"]
+        assert "more than one directory" in collision["detail"]
+        # nothing moved anywhere
+        assert (wrong / "20260101_120000_aaaaaaaa.jpg").exists()
+        assert (stray_dir / "20260101_120000_aaaaaaaa.jpg").exists()

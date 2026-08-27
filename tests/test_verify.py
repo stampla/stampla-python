@@ -12,6 +12,7 @@ import io
 import json
 import shutil
 import subprocess
+import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -395,3 +396,69 @@ class TestHybridPattern:
         config.write_text('[[trees]]\npath = "Photos"\nmedia = "photo"\n')
         code = main(["verify", "--config", str(config)])
         assert code == 2
+
+
+@requires_exiftool
+class TestScanSafety:
+    def test_unreadable_subdirectory_is_an_alarm(self, archive: Path) -> None:
+        if sys.platform == "win32":
+            pytest.skip("permission bits do not translate")
+        month = archive / "Photos" / "2026" / "2026-07"
+        make_master(month, "2026:07:01 10:00:00")
+        sealed = archive / "Photos" / "2019"
+        sealed.mkdir(parents=True)
+        sealed.chmod(0)
+        try:
+            code, payload = run_cli(archive)
+        finally:
+            sealed.chmod(0o755)
+
+        assert code == 1
+        assert buckets_of(payload)["2019"] == "scan-error"
+
+    def test_impossible_date_in_a_name_is_reported_not_fatal(self, archive: Path) -> None:
+        month = archive / "Photos" / "2026" / "2026-07"
+        good = make_master(month, "2026:07:01 10:00:00")
+        # grammar-valid but impossible: February 31st, with real metadata
+        # so the run reaches the name-vs-metadata comparison
+        impossible = month / "20260231_120000_aaaaaaaa.jpg"
+        impossible.write_bytes(TINY_JPEG + b"impossible")
+        exiftool("-EXIF:DateTimeOriginal=2026:02:28 12:00:00", str(impossible))
+
+        code, payload = run_cli(archive)
+        assert code == 1
+        entries = buckets_of(payload)
+        assert entries["20260231_120000_aaaaaaaa.jpg"] == "malformed"
+        assert good.name not in entries  # the rest still verified
+
+    def test_name_only_date_cannot_confirm_itself(self, archive: Path) -> None:
+        config = archive / "config.toml"
+        config.write_text(
+            CONFIG_TEMPLATE.format(root=str(archive))
+            + '\n[dates]\nphoto = ["EXIF:DateTimeOriginal", "File:NameTimestamp"]\n'
+        )
+        month = archive / "Photos" / "2026" / "2026-07"
+        month.mkdir(parents=True)
+        # canonical name, dateless metadata: the name is the only source
+        bare = month / "20260701_100000_aaaaaaaa.jpg"
+        bare.write_bytes(TINY_JPEG)
+
+        code, payload = run_cli(archive)
+        assert code == 1
+        entries = buckets_of(payload)
+        assert entries["20260701_100000_aaaaaaaa.jpg"] == "unresolved-date"
+        findings = payload["findings"]
+        assert isinstance(findings, list)
+        [finding] = [f for f in findings if f["bucket"] == "unresolved-date"]
+        assert "only from the filename" in str(finding["detail"])
+
+    def test_cache_usage_is_stated(self, archive: Path) -> None:
+        month = archive / "Photos" / "2026" / "2026-07"
+        make_master(month, "2026:07:01 10:00:00")
+        run_cli(archive)  # populate the manifest
+        code, payload = run_cli(archive)
+        assert code == 0
+        hints = payload["hints"]
+        assert isinstance(hints, list)
+        assert any("served from the manifest" in hint for hint in hints)
+        assert any("not content-verified" in hint for hint in hints)

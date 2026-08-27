@@ -68,22 +68,22 @@ def run_organize(
                 )
             )
 
-    owners: dict[str, list[Path]] = defaultdict(list)
-    for move in plan.moves:
-        first = next((r.old for r in move.renames), None)
-        if first is not None:
-            owners[move.key].append(first)
-    for prefix, masters in sorted(owners.items()):
-        if len(masters) > 1:
-            for master in masters:
-                report.add(
-                    Finding(
-                        Bucket.COLLISION,
-                        master,
-                        f"identical content as {len(masters) - 1} other group(s)"
-                        f" here (all derive {prefix})",
-                        related=tuple(m for m in masters if m != master),
-                        data={"prefix": prefix},
-                    )
+    # import plans one copy of duplicated content and marks the others;
+    # for triage every member of such a cluster deserves a collision row
+    clusters: dict[Path, list[Path]] = defaultdict(list)
+    for finding in list(report.findings):
+        data = finding.data or {}
+        if data.get("reason") == "card-duplicate":
+            clusters[Path(str(data["duplicate_of"]))].append(finding.path)
+    for kept, duplicates in sorted(clusters.items()):
+        members = [kept, *duplicates]
+        for master in members:
+            report.add(
+                Finding(
+                    Bucket.COLLISION,
+                    master,
+                    f"identical content as {len(members) - 1} other group(s) here",
+                    related=tuple(m for m in members if m != master),
                 )
+            )
     return report, plan

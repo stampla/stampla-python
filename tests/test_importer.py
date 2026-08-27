@@ -7,13 +7,23 @@ import io
 import json
 import shutil
 import subprocess
+import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
 
 from stampla.cli import main
+from stampla.journal import Journal
+from stampla.progress import Monitor
 from tests.test_verify import TINY_JPEG
+
+
+def findings_of(payload: dict[str, object]) -> list[dict[str, object]]:
+    findings = payload["findings"]
+    assert isinstance(findings, list)
+    return findings
+
 
 requires_exiftool = pytest.mark.skipif(
     shutil.which("exiftool") is None, reason="exiftool not installed"
@@ -487,3 +497,91 @@ class TestShootToken:
         verify_payload = json.loads(buffer.getvalue())
         assert verify_code == 0, verify_payload
         assert verify_payload["summary"]["ok"] == 1
+
+
+@requires_exiftool
+class TestScanSafety:
+    def test_unreadable_directory_withholds_formatting(self, archive: Path, tmp_path: Path) -> None:
+        if sys.platform == "win32":
+            pytest.skip("permission bits do not translate")
+        card = tmp_path / "card"
+        make_card_photo(card, "DSC_0001", "2019:06:01 09:00:00")
+        hidden = card / "DCIM_B"
+        hidden.mkdir()
+        (hidden / "DSC_0002.JPG").write_bytes(TINY_JPEG)
+        hidden.chmod(0)
+        try:
+            code, payload = run_import(archive, card, "--apply")
+        finally:
+            hidden.chmod(0o755)
+
+        assert code == 1
+        buckets = {f["bucket"] for f in findings_of(payload)}
+        assert "scan-error" in buckets
+        verdict = payload["verdict"]
+        assert isinstance(verdict, dict)
+        assert verdict["safe_to_format"] is False
+        [finding] = [f for f in findings_of(payload) if f["bucket"] == "scan-error"]
+        assert "do not format" in str(finding["detail"])
+
+    def test_newline_filename_is_an_alarm_not_a_guess(self, archive: Path, tmp_path: Path) -> None:
+        card = tmp_path / "card"
+        make_card_photo(card, "DSC_0001", "2019:06:01 09:00:00")
+        weird = card / "DSC\n-AllDates=2000:01:01.JPG"
+        weird.write_bytes(TINY_JPEG)
+
+        code, payload = run_import(archive, card, "--apply")
+        assert code == 1
+        [finding] = [f for f in findings_of(payload) if f["bucket"] == "scan-error"]
+        assert "newline" in str(finding["detail"])
+        verdict = payload["verdict"]
+        assert isinstance(verdict, dict)
+        assert verdict["safe_to_format"] is False
+        # the clean photo still imported; only the hostile name was refused
+        assert verdict["imported"] == 1
+
+    def test_duplicate_content_on_card_imports_once(self, archive: Path, tmp_path: Path) -> None:
+        card = tmp_path / "card"
+        first = make_card_photo(card / "DCIM_A", "DSC_0001", "2019:06:01 09:00:00")
+        second = card / "DCIM_B" / "DSC_0400.JPG"
+        second.parent.mkdir(parents=True)
+        second.write_bytes(first.read_bytes())
+
+        code, payload = run_import(archive, card, "--apply")
+        assert code == 0, payload
+        verdict = payload["verdict"]
+        assert isinstance(verdict, dict)
+        assert verdict["safe_to_format"] is True
+        assert verdict["imported"] == 1
+        [dup] = [f for f in findings_of(payload) if f["bucket"] == "ignored"]
+        dup_data = dup["data"]
+        assert isinstance(dup_data, dict)
+        assert dup_data["reason"] == "card-duplicate"
+        month = archive / "Photos" / "2019" / "2019-06"
+        assert len(list(month.glob("*.jpg"))) == 1
+
+    def test_post_apply_verification_failure_withholds_formatting(
+        self, archive: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        card = tmp_path / "card"
+        make_card_photo(card, "DSC_0001", "2019:06:01 09:00:00")
+
+        import stampla.importer as importer_module
+
+        real_apply = importer_module.apply_plan  # type: ignore[attr-defined]
+
+        def truncating_apply(journal: Journal, **kwargs: Monitor | None) -> object:
+            result = real_apply(journal, **kwargs)
+            month = archive / "Photos" / "2019" / "2019-06"
+            for copied in month.glob("*.jpg"):
+                copied.write_bytes(b"rotted after the copy landed")
+            return result
+
+        monkeypatch.setattr(importer_module, "apply_plan", truncating_apply)
+        code, payload = run_import(archive, card, "--apply")
+        assert code == 1
+        [finding] = [f for f in findings_of(payload) if f["bucket"] == "corruption"]
+        assert "do not format the card" in str(finding["detail"])
+        verdict = payload["verdict"]
+        assert isinstance(verdict, dict)
+        assert verdict["safe_to_format"] is False

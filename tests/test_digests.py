@@ -82,4 +82,4 @@ class TestNamingDigests:
         weird.write_text("not an image")
         digests, errors = naming_digests([weird], pattern, tool)
         assert digests == {}
-        assert "no image data" in errors[weird]
+        assert "no image-data hash" in errors[weird]

@@ -129,31 +129,36 @@ class Journal:
 
     @classmethod
     def load(cls, path: Path) -> Journal:
-        with path.open(encoding="utf-8") as stream:
-            payload = json.load(stream)
-        moves = tuple(
-            GroupMove(
-                key=entry["key"],
-                renames=tuple(
-                    Rename(
-                        old=Path(item[0]),
-                        new=Path(item[1]),
-                        digest=item[2] if len(item) > 2 else None,
-                    )
-                    for item in entry["renames"]
-                ),
+        try:
+            with path.open(encoding="utf-8") as stream:
+                payload = json.load(stream)
+            moves = tuple(
+                GroupMove(
+                    key=entry["key"],
+                    renames=tuple(
+                        Rename(
+                            old=Path(item[0]),
+                            new=Path(item[1]),
+                            digest=item[2] if len(item) > 2 else None,
+                        )
+                        for item in entry["renames"]
+                    ),
+                )
+                for entry in payload["moves"]
             )
-            for entry in payload["moves"]
-        )
-        return cls(
-            path,
-            Path(payload["root"]),
-            moves,
-            kind=payload.get("kind", "rename"),
-            algorithm=payload.get("algorithm", "md5"),
-            command=payload.get("command"),
-            created_at=payload.get("created_at", ""),
-        )
+            return cls(
+                path,
+                Path(payload["root"]),
+                moves,
+                kind=payload.get("kind", "rename"),
+                algorithm=payload.get("algorithm", "md5"),
+                command=payload.get("command"),
+                created_at=payload.get("created_at", ""),
+            )
+        except (KeyError, TypeError, IndexError, ValueError) as error:
+            # a truncated or hand-edited journal must fail with its name,
+            # not a raw traceback from deep inside the parser
+            raise ValueError(f"journal is corrupt or truncated: {path} ({error!r})") from error
 
     def done_keys(self) -> set[str]:
         """Applied groups: done lines minus their undo tombstones, in order."""
@@ -247,20 +252,26 @@ class JournalSummary:
 
 
 def journal_summaries(
-    directory: Path | None = None, root: Path | None = None
+    directory: Path | None = None,
+    root: Path | None = None,
+    unreadable: list[Path] | None = None,
 ) -> list[JournalSummary]:
     """Summaries of every readable journal, oldest first.
 
     ``root`` narrows the history to one archive — journals are stored
     globally, but a consumer almost always asks about a single root.
-    Unreadable journal files are skipped; they still appear in
-    :func:`list_journals` for whoever wants to inspect them.
+    Unreadable journal files are collected into ``unreadable`` when a
+    list is passed (so history can say "N unreadable" instead of
+    silently showing fewer runs than exist); they always remain visible
+    to :func:`list_journals`.
     """
     summaries: list[JournalSummary] = []
     for path in list_journals(directory):
         try:
             journal = Journal.load(path)
-        except (OSError, ValueError, KeyError):
+        except (OSError, ValueError):
+            if unreadable is not None:
+                unreadable.append(path)
             continue
         if root is not None and Path(journal.root).resolve() != root.resolve():
             continue
