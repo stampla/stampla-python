@@ -72,4 +72,4 @@ for every option.
 
 ## License
 
-[MIT](https://github.com/stampla/stampla/blob/main/LICENSE)
+[GPL-3.0-or-later](https://github.com/stampla/stampla/blob/main/LICENSE)

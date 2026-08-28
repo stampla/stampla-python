@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "stampla"
 description = "Deterministic, verifiable naming for photo and video archives"
 readme = "README.md"
-license = "MIT"
+license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [{ name = "Jakub Stefanski", email = "js@jakubstefanski.com" }]
 requires-python = ">=3.11"
